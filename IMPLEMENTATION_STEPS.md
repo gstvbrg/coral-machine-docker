@@ -1,5 +1,5 @@
 # Coral Machine Docker Implementation Strategy
-**Updated**: January 2025  
+**Updated**: September 2025  
 **Strategy**: Incremental 5-Phase Build for Rapid Development Deployment
 
 ## Overview: Test Early, Fail Fast, Build on Success
@@ -24,10 +24,10 @@ Your current image already includes:
 ### Phase 1 Commands
 ```bash
 # Build current image 
-docker build -t coral-dev-phase1 .
+docker build -t coral-machine-dev-p1 .
 
 # Test container startup
-docker run --rm -it --gpus all coral-dev-phase1
+docker run --rm -it --gpus all coral-machine-dev-p1
 
 # Test inside container:
 # 1. SSH connectivity
@@ -82,10 +82,10 @@ WORKDIR /workspace
 ### Phase 2 Testing
 ```bash
 # Build Phase 2
-docker build -t coral-dev-phase2 .
+docker build -t coral-machine-dev-p2 .
 
 # Verify installation
-docker run --rm coral-dev-phase2 bash -c \
+docker run --rm coral-machine-dev-p2 bash -c \
   "ls -la /opt/deps/lib/ && ls -la /opt/deps/include/ && \
    find /opt/deps -name '*geometry*' -type f"
 
@@ -94,7 +94,7 @@ echo 'find_package(PkgConfig)
 find_path(GC_INC geometrycentral PATHS /opt/deps/include)
 message(STATUS "Found: ${GC_INC}")' > test_gc.cmake
 
-docker run --rm -v $(pwd):/test coral-dev-phase2 \
+docker run --rm -v $(pwd):/test coral-machine-dev-p2 \
   bash -c "cd /test && cmake -P test_gc.cmake"
 ```
 
@@ -141,14 +141,14 @@ RUN echo "🧮 Building Palabos-hybrid (this will take ~45 minutes)..." && \
 ### Phase 3 Testing
 ```bash
 # Build Phase 3 (expect 45-60 minutes)
-docker build -t coral-dev-phase3 .
+docker build -t coral-machine-dev-p3 .
 
 # Test MPI + GPU + Palabos integration
-docker run --rm --gpus all coral-dev-phase3 bash -c \
+docker run --rm --gpus all coral-machine-dev-p3 bash -c \
   "ls /opt/deps/lib/libpalabos* && \
    mpirun -np 2 --allow-run-as-root echo 'MPI working' && \
    nvidia-smi && \
-   echo 'Phase 3 SUCCESS: Simulation engine ready'"
+   echo 'p 3 SUCCESS: Simulation engine ready'"
 ```
 
 ### Success Criteria
@@ -207,10 +207,10 @@ RUN echo "🎨 Building Polyscope (optional visualization)..." && \
 ### Phase 4 Testing
 ```bash
 # Build Phase 4
-docker build -t coral-dev-phase4 .
+docker build -t coral-machine-dev-p4 .
 
 # Test Polyscope availability
-docker run --rm coral-dev-phase4 bash -c \
+docker run --rm coral-machine-dev-p4 bash -c \
   "find /opt/deps -name '*polyscope*' -type f"
 ```
 
@@ -275,16 +275,16 @@ message(STATUS "🎉 Integration test completed successfully!")
 ### Phase 5 Testing
 ```bash
 # Final integration test
-docker build -t coral-dev-final .
+docker build -t coral-machine-dev-final .
 
 # Test dependency discovery
-docker run --rm -v $(pwd):/test coral-dev-final \
+docker run --rm -v $(pwd):/test coral-machine-dev-final \
   bash -c "cd /test && cmake -P test-integration.cmake"
 
 # Test CoralMachine source integration
 docker run --rm --gpus all \
   -e REPO_URL=https://github.com/yourusername/coralMachine.git \
-  coral-dev-final bash -c \
+  coral-machine-dev-final bash -c \
   "cd /workspace/source && \
    cmake -B build -G Ninja \
      -DCMAKE_PREFIX_PATH=/opt/deps \
@@ -305,7 +305,7 @@ docker run --rm --gpus all \
 ### General Debugging Approach
 ```bash
 # Drop into container for interactive debugging
-docker run --rm -it --gpus all coral-dev-phaseX bash
+docker run --rm -it --gpus all coral-machine-dev-pX bash
 
 # Check specific dependency
 ls -la /opt/deps/lib/ | grep dependency-name
@@ -367,7 +367,7 @@ docker run --rm --gpus all \
   -e MPI_PROCESSES=2 \
   -e PV_CONNECT_ID=1234 \
   -p 2222:22 -p 11111:11111 \
-  coral-dev-final
+  coral-machine-dev-final
 
 # Should see:
 # ✅ SSH server on port 22

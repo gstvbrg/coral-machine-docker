@@ -8,8 +8,15 @@ FROM nvcr.io/nvidia/nvhpc:24.7-devel-cuda12.5-ubuntu22.04
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-lc"]
 
+# Fix GPG signature issues by reinstalling keyring and certs
+RUN apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* && \
+    apt-get update --allow-insecure-repositories && \
+    apt-get install -y --allow-unauthenticated --reinstall --no-install-recommends \
+    ca-certificates ubuntu-keyring curl gnupg && \
+    apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*
+
 # Base packages & headless graphics bits
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo openssh-server \
     cmake ninja-build ccache git zsh tmux curl wget rsync unzip \
     netcat-openbsd \
@@ -39,12 +46,33 @@ RUN mkdir -p /workspace /opt/deps /opt/paraview \
 
 # Install ParaView (required for VTK visualization workflow)
 RUN echo "Installing ParaView server (required dependency)" && \
-    wget -qO /tmp/paraview.tar.gz \
-    "https://www.paraview.org/files/v5.12/ParaView-5.12.0-egl-MPI-Linux-Python3.10-x86_64.tar.gz" && \
+    ARCH="$(dpkg --print-architecture)"; \
+    PV_URL="https://www.paraview.org/files/v5.12/ParaView-5.12.0-egl-MPI-Linux-Python3.10-${ARCH}.tar.gz"; \
+    # Map Debian arch to ParaView naming
+    if [ "$ARCH" = "amd64" ]; then PV_URL="${PV_URL/amd64/x86_64}"; fi; \
+    wget -qO /tmp/paraview.tar.gz "$PV_URL" && \
     tar -xzf /tmp/paraview.tar.gz -C /opt/paraview --strip-components=1 && \
     rm /tmp/paraview.tar.gz && \
     # Verify installation
     test -x /opt/paraview/bin/pvserver || (echo "ParaView installation failed" && exit 1)
+
+# Phase 2: geometry-central (mesh processing library)
+# Small dependency to validate C++ build toolchain
+WORKDIR /tmp/build
+
+RUN echo "🔧 Building geometry-central..." && \
+    git clone --recursive --depth 1 \
+    https://github.com/nmwsharp/geometry-central.git && \
+    cd geometry-central && \
+    mkdir build && cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/deps \
+             -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_CXX_COMPILER=nvc++ && \
+    make -j$(nproc) install && \
+    echo "✅ geometry-central installed successfully" && \
+    cd / && rm -rf /tmp/build/geometry-central
+
+WORKDIR /workspace
 
 # Environment
 ENV PATH="/opt/paraview/bin:${PATH}"
