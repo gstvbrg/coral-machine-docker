@@ -1,0 +1,48 @@
+{
+    "version": 3,
+    "cmakeMinimumRequired": {
+      "major": 3,
+      "minor": 20,
+      "patch": 0
+    },
+    "configurePresets": [
+      {
+        "name": "base",
+        "hidden": true,
+        "generator": "Ninja",
+        "binaryDir": "${sourceDir}/build/${presetName}",
+        "cacheVariables": {
+          "CMAKE_PREFIX_PATH": "/opt/deps",
+          "CMAKE_BUILD_TYPE": "RelWithDebInfo",
+          "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+          "CMAKE_CXX_COMPILER": "nvc++",
+          "CMAKE_CXX_COMPILER_LAUNCHER": "ccache"
+        }
+      },
+      {
+        "name": "gpu-generic",
+        "inherits": "base",
+        "cacheVariables": {
+          "CMAKE_CXX_FLAGS": "-stdpar"
+        }
+      },
+      {
+        "name": "gpu-arch",
+        "inherits": "base",
+        "cacheVariables": {
+          "CMAKE_CXX_FLAGS": "-stdpar -gpu=${env:NV_GPU_ARCH}"
+        }
+      }
+    ],
+    "buildPresets": [
+      {
+        "name": "gpu-generic-relwithdebinfo",
+        "configurePreset": "gpu-generic"
+      },
+      {
+        "name": "gpu-arch-relwithdebinfo",
+        "configurePreset": "gpu-arch"
+      }
+    ]
+  }
+  
