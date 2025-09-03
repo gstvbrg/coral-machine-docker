@@ -4,7 +4,7 @@ set -euo pipefail
 echo "🚀 PORAG Dev Environment Starting"
 
 # ---------- Config via env ----------
-: "${REPO_URL:=git@github.com:username/coralMachine.git}"   # your repo (SSH recommended)
+: "${REPO_URL:=git@github.com:gstvbrg/coral-machine.git}"   # your repo (SSH for authentication)
 : "${REPO_BRANCH:=main}"
 : "${SRC_DIR:=/workspace/source}"
 : "${BUILD_DIR:=${SRC_DIR}/build}"
@@ -28,8 +28,8 @@ fi
 
 # Dev user's SSH setup
 mkdir -p ~dev/.ssh
-chmod 700 ~dev/.ssh
-chown -R dev:dev ~dev/.ssh
+chmod 700 ~dev/.ssh || true
+chown -R dev:dev ~dev/.ssh || true
 
 if [[ -n "${AUTH_KEYS_PATH}" && -f "${AUTH_KEYS_PATH}" ]]; then
   install -m 600 -o dev -g dev "${AUTH_KEYS_PATH}" ~dev/.ssh/authorized_keys

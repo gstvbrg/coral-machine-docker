@@ -21,8 +21,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     cmake ninja-build ccache git zsh tmux curl wget rsync unzip \
     netcat-openbsd \
     libopenmpi-dev openmpi-bin \
+    libeigen3-dev \
+    libgl1-mesa-dev libglfw3-dev libglm-dev \
     # EGL headless (uses host NVIDIA driver libs), X fallback bits:
-    libegl1 libgl1 libxrender1 libxkbcommon0 \
+    libegl1 libgl1 libopengl0 libxrender1 libxkbcommon0 \
     xvfb mesa-utils \
     tini \
  && rm -rf /var/lib/apt/lists/*
@@ -67,16 +69,82 @@ RUN echo "🔧 Building geometry-central..." && \
     mkdir build && cd build && \
     cmake .. -DCMAKE_INSTALL_PREFIX=/opt/deps \
              -DCMAKE_BUILD_TYPE=Release \
-             -DCMAKE_CXX_COMPILER=nvc++ && \
+             -DCMAKE_CXX_COMPILER=g++ \
+             -DCMAKE_CXX_STANDARD=17 \
+             -DCMAKE_VERBOSE_MAKEFILE=ON && \
     make -j$(nproc) install && \
     echo "✅ geometry-central installed successfully" && \
     cd / && rm -rf /tmp/build/geometry-central
 
 WORKDIR /workspace
 
+# Phase 4: Polyscope (optional visualization)
+WORKDIR /tmp/build
+
+RUN echo "🎨 Building Polyscope (optional)..." && \
+    mkdir -p /tmp/build && cd /tmp/build && \
+    git clone --recursive --depth 1 https://github.com/nmwsharp/polyscope.git && \
+    cd polyscope && \
+    mkdir -p build && cd build && \
+    cmake .. -DCMAKE_INSTALL_PREFIX=/opt/deps \
+             -DCMAKE_BUILD_TYPE=Release \
+             -DPOLYSCOPE_BACKEND=OPENGL3_GLFW \
+             -DPOLYSCOPE_ENABLE_RENDER_BACKEND_OPENGL3=ON && \
+    make -j$(nproc) install && \
+    echo "✅ Polyscope installed" || ( \
+      echo "⚠️  Polyscope install not found; vendoring headers only" && \
+      cd .. && mkdir -p /opt/deps/include && cp -r include/polyscope /opt/deps/include/ && \
+      IMGUI_DIR=$(dirname $(find . -type f -name imgui.h | head -n1)) && \
+      mkdir -p /opt/deps/include/imgui && cp -r ${IMGUI_DIR}/* /opt/deps/include/imgui/ || true \
+    ); \
+    # Also vendor implot headers if present
+    IPLOT_DIR=$(dirname $(find /tmp/build/polyscope -type f -name implot.h | head -n1)) && \
+    if [ -n "$IPLOT_DIR" ]; then mkdir -p /opt/deps/include/implot && cp -r ${IPLOT_DIR}/* /opt/deps/include/implot/; fi || true
+
+WORKDIR /workspace
+
+# Phase 3: Palabos-hybrid (core simulation engine)
+# Build with NVHPC, CUDA, and MPI enabled
+WORKDIR /tmp/build
+
+RUN echo "🧮 Building Palabos-hybrid (this will take a while)..." && \
+    mkdir -p /tmp/build && cd /tmp/build && \
+    git clone --depth 1 https://github.com/gstvbrg/palabos-hybrid-prerelease.git palabos-hybrid && \
+    cd palabos-hybrid && \
+    # Disable building anything under examples/ by commenting out add_subdirectory calls
+    sed -i -E 's|^[[:space:]]*add_subdirectory[[:space:]]*\([[:space:]]*examples/|# DISABLED: &|g' CMakeLists.txt && \
+    rm -rf build && mkdir -p build && cd build && \
+    cmake .. -DCMAKE_BUILD_TYPE=Release \
+             -DCMAKE_CXX_COMPILER=g++ \
+             -DCMAKE_CXX_STANDARD=20 \
+             -DCMAKE_CUDA_COMPILER=nvcc \
+             -DPALABOS_ENABLE_MPI=ON \
+             -DPALABOS_ENABLE_CUDA=ON \
+             -DBUILD_HDF5=OFF \
+             -DBUILD_EXAMPLES=OFF \
+             -DBUILD_TESTING=OFF \
+             -DPALABOS_BUILD_EXAMPLES=OFF \
+             -DPALABOS_BUILD_TUTORIALS=OFF \
+             -DPALABOS_BUILD_TESTS=OFF \
+             -DCUDA_ARCH="sm_75;sm_80;sm_86;sm_89" && \
+    # Build Palabos-hybrid library
+    make -j$(nproc) && \
+    # Manually install library and headers since Palabos doesn't have install target
+    cd .. && \
+    mkdir -p /opt/deps/palabos-hybrid /opt/deps/lib && \
+    rsync -a --delete --exclude .git --exclude build --exclude examples ./ /opt/deps/palabos-hybrid/ && \
+    # Copy any built libraries to deps location
+    find build -name "*.a" -o -name "*.so" | xargs -I{} cp {} /opt/deps/lib/ 2>/dev/null || true && \
+    echo "✅ Palabos-hybrid sources and libraries installed to /opt/deps" && \
+    cd / && rm -rf /tmp/build/palabos-hybrid
+
+WORKDIR /workspace
+
 # Environment
 ENV PATH="/opt/paraview/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/paraview/lib:${LD_LIBRARY_PATH}"
 ENV CMAKE_PREFIX_PATH="/opt/deps"
+ENV PALABOS_ROOT="/opt/deps/palabos-hybrid"
 ENV CCACHE_DIR="/workspace/.ccache" CCACHE_MAXSIZE="10G"
 ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
 

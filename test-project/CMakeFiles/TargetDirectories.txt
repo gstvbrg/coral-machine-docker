@@ -1,0 +1,3 @@
+/workspace/test-project/CMakeFiles/coral_test.dir
+/workspace/test-project/CMakeFiles/edit_cache.dir
+/workspace/test-project/CMakeFiles/rebuild_cache.dir

@@ -124,7 +124,7 @@ Add after Phase 2:
 RUN echo "🧮 Building Palabos-hybrid (this will take ~45 minutes)..." && \
     mkdir -p /tmp/build && cd /tmp/build && \
     git clone --depth 1 \
-    https://gitlab.com/unigespc/palabos.git palabos-hybrid && \
+   https://github.com/gstvbrg/palabos-hybrid-prerelease.git palabos-hybrid && \
     cd palabos-hybrid && \
     mkdir build && cd build && \
     cmake .. -DCMAKE_INSTALL_PREFIX=/opt/deps \
