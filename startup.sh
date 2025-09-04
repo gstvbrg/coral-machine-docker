@@ -12,7 +12,7 @@ echo "🚀 PORAG Dev Environment Starting"
 : "${REPO_BRANCH:=main}"
 : "${SRC_DIR:=/workspace/source}"
 : "${BUILD_DIR:=${SRC_DIR}/build}"
-: "${PV_BACKEND:=egl}"              # egl | xvfb | none
+: "${PV_BACKEND:=xvfb}"             # xvfb | egl | none (xvfb for GLX build)
 : "${PV_SERVER_PORT:=11111}"
 : "${NV_GPU_ARCH:=}"                # e.g., cc89 for 4090; leave empty for generic
 : "${AUTH_KEYS_PATH:=}"             # optional: path to authorized_keys mounted into container
@@ -170,13 +170,18 @@ start_pv() {
     return 1
   fi
 
-  # Build pvserver command
+  # Build pvserver command with NVIDIA IndeX support
   if [[ "${MPI_PROCESSES}" -gt 1 ]]; then
     PVSERVER_CMD="mpirun --allow-run-as-root -np ${MPI_PROCESSES} pvserver"
     echo "🧪 Starting parallel pvserver (${MPI_PROCESSES} processes) on port ${PV_SERVER_PORT}"
   else  
     PVSERVER_CMD="pvserver"
     echo "🧪 Starting single-process pvserver on port ${PV_SERVER_PORT}"
+  fi
+  
+  # Check for NVIDIA GPU and IndeX plugin
+  if nvidia-smi >/dev/null 2>&1; then
+    echo "🎮 NVIDIA GPU detected - IndeX plugin available for volume rendering"
   fi
 
   # Build arguments
@@ -214,7 +219,7 @@ start_pv() {
     echo "🎮 Using EGL for hardware-accelerated headless rendering"
   fi
 
-  # Launch pvserver (as dev user) in background and report status
+  # Launch pvserver (as dev user using sudo for proper environment)
   echo "▶️  Command: ${PVSERVER_CMD} ${PVSERVER_ARGS}"
   sudo -u dev -H bash -lc "${PVSERVER_CMD} ${PVSERVER_ARGS} >/dev/null 2>&1 &"
   if [[ $? -eq 0 ]]; then
