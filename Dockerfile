@@ -15,12 +15,14 @@ RUN apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* && \
     ca-certificates ubuntu-keyring curl gnupg && \
     apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*
 
-# Base packages & headless graphics bits
+# Base packages & headless graphics bits + DEV TOOLS
 RUN apt-get update && apt-get install -y --no-install-recommends \
     sudo openssh-server \
-    cmake ninja-build ccache git zsh tmux curl wget rsync unzip \
-    netcat-openbsd \
-    libopenmpi-dev openmpi-bin \
+    cmake ninja-build ccache git git-lfs zsh tmux curl wget rsync unzip \
+    # Development tools (ADDED FOR BETTER DEV EXPERIENCE)
+    vim nano htop ncdu tree jq \
+    # Network debugging
+    netcat-openbsd iputils-ping net-tools \
     libeigen3-dev \
     libgl1-mesa-dev libglfw3-dev libglm-dev \
     # EGL headless (uses host NVIDIA driver libs), X fallback bits:
@@ -35,27 +37,42 @@ RUN groupadd -g 1000 dev \
  && usermod -aG sudo dev \
  && echo "dev ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/dev
 
-# Setup SSH keys for dev user (if provided)
-COPY --chown=dev:dev authorized_keys* /tmp/
-RUN mkdir -p /home/dev/.ssh && \
-    if [ -f /tmp/authorized_keys ]; then \
-        cp /tmp/authorized_keys /home/dev/.ssh/authorized_keys && \
-        chmod 700 /home/dev/.ssh && \
-        chmod 600 /home/dev/.ssh/authorized_keys && \
-        chown -R dev:dev /home/dev/.ssh; \
-    fi && \
-    rm -f /tmp/authorized_keys*
-
-# SSH daemon baseline
+# SSH daemon configuration (secure defaults: key-only auth)
 RUN mkdir -p /var/run/sshd \
  && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
  && sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config \
  && sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
- && sed -i 's@^#\?AuthorizedKeysFile .*@AuthorizedKeysFile .ssh/authorized_keys@' /etc/ssh/sshd_config
+ && sed -i 's@^#\?AuthorizedKeysFile .*@AuthorizedKeysFile .ssh/authorized_keys@' /etc/ssh/sshd_config \
+ && sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config
 
 # Workspace & deps dirs
 RUN mkdir -p /workspace /opt/deps /opt/paraview \
  && chown -R dev:dev /workspace /opt/deps /opt/paraview
+
+# CRITICAL FIX: Set up environment variables globally
+# This ensures ALL sessions (SSH, docker exec, etc) get correct paths
+ENV PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/bin:${PATH}"
+ENV PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/comm_libs/mpi/bin:${PATH}"
+ENV PATH="/opt/paraview/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/math_libs/lib64:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/cuda/lib64:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/paraview/lib:${LD_LIBRARY_PATH}"
+ENV CMAKE_PREFIX_PATH="/opt/deps"
+ENV PALABOS_ROOT="/opt/deps/palabos-hybrid"
+ENV CCACHE_DIR="/workspace/.ccache"
+ENV CCACHE_MAXSIZE="10G"
+ENV LANG=C.UTF-8
+ENV LC_ALL=C.UTF-8
+
+# Create profile script for SSH sessions
+RUN echo 'export PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/bin:$PATH"' >> /etc/profile.d/coral-env.sh && \
+    echo 'export PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/comm_libs/mpi/bin:$PATH"' >> /etc/profile.d/coral-env.sh && \
+    echo 'export PATH="/opt/paraview/bin:$PATH"' >> /etc/profile.d/coral-env.sh && \
+    echo 'export LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/lib:$LD_LIBRARY_PATH"' >> /etc/profile.d/coral-env.sh && \
+    echo 'export CMAKE_PREFIX_PATH="/opt/deps"' >> /etc/profile.d/coral-env.sh && \
+    echo 'export PALABOS_ROOT="/opt/deps/palabos-hybrid"' >> /etc/profile.d/coral-env.sh && \
+    chmod +x /etc/profile.d/coral-env.sh
 
 # Install ParaView (required for VTK visualization workflow)
 RUN echo "Installing ParaView server (required dependency)" && \
@@ -157,27 +174,48 @@ RUN echo "🧮 Building Palabos-hybrid (this will take a while)..." && \
 
 WORKDIR /workspace
 
-# Environment
-ENV PATH="/opt/paraview/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/paraview/lib:${LD_LIBRARY_PATH}"
-ENV CMAKE_PREFIX_PATH="/opt/deps"
-ENV PALABOS_ROOT="/opt/deps/palabos-hybrid"
-ENV CCACHE_DIR="/workspace/.ccache" CCACHE_MAXSIZE="10G"
-ENV LANG=C.UTF-8 LC_ALL=C.UTF-8
+# Note: Environment variables already set earlier in Dockerfile for better layer caching
 
-# Startup
+# Setup dev user configuration
+USER dev
+RUN mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+    touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && \
+    # Setup zsh
+    echo 'source /etc/profile.d/coral-env.sh' >> ~/.zshrc && \
+    echo 'export PS1="%n@coral-dev %~ %# "' >> ~/.zshrc && \
+    # Setup vim
+    echo 'syntax on' >> ~/.vimrc && \
+    echo 'set number' >> ~/.vimrc && \
+    echo 'set autoindent' >> ~/.vimrc && \
+    echo 'set tabstop=4' >> ~/.vimrc && \
+    echo 'set shiftwidth=4' >> ~/.vimrc && \
+    echo 'set expandtab' >> ~/.vimrc
+
+USER root
+
+# COPY OPERATIONS GO LAST TO PRESERVE BUILD CACHE!
+# Copy authorized_keys if provided (optional)
+COPY --chown=dev:dev authorized_keys* /tmp/
+RUN if [ -f /tmp/authorized_keys ]; then \
+        cp /tmp/authorized_keys /home/dev/.ssh/authorized_keys && \
+        chmod 600 /home/dev/.ssh/authorized_keys && \
+        chown dev:dev /home/dev/.ssh/authorized_keys; \
+    fi && \
+    rm -f /tmp/authorized_keys*
+
+# Copy startup script LAST (most likely to change)
 COPY startup.sh /usr/local/bin/startup.sh
-RUN chmod +x /usr/local/bin/startup.sh \
- && chown dev:dev /usr/local/bin/startup.sh
+RUN chmod +x /usr/local/bin/startup.sh && \
+    chown root:root /usr/local/bin/startup.sh
 
 WORKDIR /workspace
 
 # Ports: SSH & ParaView
 EXPOSE 22 11111
 
-# Healthcheck: ParaView server availability (pvserver always installed)
+# Healthcheck: SSH availability (more critical than ParaView)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=10 \
-  CMD nc -z 127.0.0.1 ${PV_SERVER_PORT:-11111}
+  CMD nc -z localhost 22 || exit 1
 
 # Use tini as PID 1
 ENTRYPOINT ["/usr/bin/tini", "--"]
