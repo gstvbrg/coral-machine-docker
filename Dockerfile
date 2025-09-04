@@ -35,6 +35,17 @@ RUN groupadd -g 1000 dev \
  && usermod -aG sudo dev \
  && echo "dev ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/dev
 
+# Setup SSH keys for dev user (if provided)
+COPY --chown=dev:dev authorized_keys* /tmp/
+RUN mkdir -p /home/dev/.ssh && \
+    if [ -f /tmp/authorized_keys ]; then \
+        cp /tmp/authorized_keys /home/dev/.ssh/authorized_keys && \
+        chmod 700 /home/dev/.ssh && \
+        chmod 600 /home/dev/.ssh/authorized_keys && \
+        chown -R dev:dev /home/dev/.ssh; \
+    fi && \
+    rm -f /tmp/authorized_keys*
+
 # SSH daemon baseline
 RUN mkdir -p /var/run/sshd \
  && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
@@ -128,14 +139,20 @@ RUN echo "🧮 Building Palabos-hybrid (this will take a while)..." && \
              -DPALABOS_BUILD_TESTS=OFF \
              -DCUDA_ARCH="sm_75;sm_80;sm_86;sm_89" && \
     # Build Palabos-hybrid library
-    make -j$(nproc) && \
-    # Manually install library and headers since Palabos doesn't have install target
+    make -j$(nproc) palabos && \
+    # Install in expected structure for our CMakeLists.txt
     cd .. && \
-    mkdir -p /opt/deps/palabos-hybrid /opt/deps/lib && \
-    rsync -a --delete --exclude .git --exclude build --exclude examples ./ /opt/deps/palabos-hybrid/ && \
-    # Copy any built libraries to deps location
-    find build -name "*.a" -o -name "*.so" | xargs -I{} cp {} /opt/deps/lib/ 2>/dev/null || true && \
-    echo "✅ Palabos-hybrid sources and libraries installed to /opt/deps" && \
+    mkdir -p /opt/deps/palabos-hybrid/include /opt/deps/palabos-hybrid/lib && \
+    # Copy headers (preserving directory structure)
+    cp -r src /opt/deps/palabos-hybrid/include/ && \
+    cp -r externalLibraries /opt/deps/palabos-hybrid/include/ && \
+    # Copy the built library
+    find build -name "libpalabos.a" -exec cp {} /opt/deps/palabos-hybrid/lib/ \; && \
+    # Verify installation
+    test -f /opt/deps/palabos-hybrid/lib/libpalabos.a || (echo "ERROR: libpalabos.a not found!" && exit 1) && \
+    echo "✅ Palabos-hybrid installed to /opt/deps/palabos-hybrid" && \
+    echo "   Headers: /opt/deps/palabos-hybrid/include/{src,externalLibraries}" && \
+    echo "   Library: /opt/deps/palabos-hybrid/lib/libpalabos.a" && \
     cd / && rm -rf /tmp/build/palabos-hybrid
 
 WORKDIR /workspace
