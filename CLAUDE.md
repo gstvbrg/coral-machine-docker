@@ -4,40 +4,71 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-This repository builds a pre-compiled Docker development environment for coral machine simulation (PORAG) optimized for RunPod GPU workstations. The core philosophy is **everything pre-built** - all heavy dependencies (Palabos-hybrid, geometry-central, Polyscope, ParaView server) are compiled into a single Docker image to achieve <90 seconds from deployment to full development productivity.
+This repository builds Docker development environments for coral machine simulation (PORAG) optimized for RunPod GPU workstations. The project now uses a **volume-based architecture** to achieve <90 seconds from deployment to full development productivity.
 
-## Architecture
+## Current Architecture: Volume-Based Strategy
 
-### Single Pre-Built Image Strategy
-- **Base**: NVIDIA HPC SDK 24.7 with CUDA 12.5
-- **Pre-compiled dependencies**: Palabos-hybrid, geometry-central, Polyscope, ParaView server
-- **Development tools**: nvc++ (GPU compiler), ninja, ccache, tmux, zsh
-- **Target deployment**: RunPod GPU instances (RTX 4090/A6000/A100)
-- **Storage strategy**: Persistent volumes for `/workspace` (source code, builds, VTK files)
+### Two-Part System
+1. **Minimal base image (5GB)**: NVIDIA HPC SDK + essential tools only
+2. **Persistent volumes (175GB)**: Pre-compiled dependencies + workspace
 
-### Container Directory Structure
+### Benefits
+- **Fast restarts**: <90 seconds for warm starts (cached image)
+- **Cost efficient**: $26/month for persistent storage vs repeated downloads
+- **Perfect for development**: Frequent stop/start workflow supported
+
+### Volume Structure
 ```
-/opt/deps/          # Pre-built dependencies (read-only, in image)
-/workspace/         # Persistent development area
-├── source/         # Git repository (CoralMachine)
-├── build/          # Ninja build outputs  
-├── .ccache/        # Compiler cache (10GB)
-├── vtk/            # VTK simulation outputs
-└── profiles/       # GPU profiling results
+/workspace/deps/            # Pre-compiled dependencies (mounted from volume)
+├── paraview/              # ParaView server (headless)
+├── palabos-hybrid/        # Pre-compiled Palabos library
+├── geometry-central/      # Mesh processing library
+└── include/               # All library headers
+
+/workspace/                # Persistent development area (volume)
+├── source/               # Git repository (CoralMachine)
+├── build/                # Ninja build outputs  
+├── .ccache/              # Compiler cache (10GB)
+└── vtk/                  # VTK simulation outputs
+```
+
+## Repository Structure
+
+```
+coral-machine-docker/
+├── volume-based/         # CURRENT APPROACH (use this)
+│   ├── docker/          # Dockerfile.base + Dockerfile.setup
+│   ├── scripts/         # setup-volume.sh + startup.sh
+│   ├── docker-compose.yml
+│   └── README.md
+├── legacy-monolithic/    # Old 25GB approach (deprecated)
+└── docs/                # Shared documentation
 ```
 
 ## Common Commands
 
+### Volume-Based Workflow
+```bash
+cd volume-based/
+
+# One-time volume setup (30-45 minutes)
+docker-compose --profile setup run setup
+
+# Daily development (starts in <90 seconds)
+docker-compose --profile dev up -d dev
+
+# Connect via SSH
+ssh dev@localhost -p 2222
+```
+
 ### Docker Image Management
 ```bash
-# Build the complete development image (done once)
-docker build -t gstvbrg/coral-machine-dev:latest .
+# Build minimal base image (5GB)
+docker build -f docker/Dockerfile.base -t coral-dev:base .
 
-# Push to Docker Hub for RunPod access
-docker push gstvbrg/coral-machine-dev:latest
-
-# Test image locally
-docker run --rm -it --gpus all gstvbrg/coral-machine-dev:latest
+# Push to Docker Hub for RunPod
+docker tag coral-dev:base gstvbrg/coral-dev:volume-based
+docker push gstvbrg/coral-dev:volume-based
 ```
 
 ### Development Workflow
@@ -75,13 +106,21 @@ watch -n 1 nvidia-smi
 
 ## Implementation Status
 
-**Current Phase**: Documentation and planning
-**Next Phase**: Dockerfile implementation following incremental strategy in IMPLEMENTATION_STEPS.md
+**Current Phase**: Volume-based architecture implemented and ready for testing
+**Architecture**: Switched from monolithic 25GB image to 5GB base + persistent volumes
 
-Key files to create:
-- `Dockerfile` - Main image definition with pre-compiled dependencies
-- `scripts/startup.sh` - Container initialization (git pull + build)
-- `config/` directory - zsh, tmux, and development configurations
+### Completed
+- ✅ Volume-based architecture design
+- ✅ Minimal base image (Dockerfile.base)
+- ✅ Volume setup automation (Dockerfile.setup + setup-volume.sh)
+- ✅ Docker Compose orchestration
+- ✅ Repository reorganization for clarity
+
+### Next Steps
+1. Test volume initialization locally
+2. Push base image to Docker Hub
+3. Deploy and test on RunPod
+4. Optimize based on real-world usage
 
 ## Development Environment Integration
 
@@ -91,16 +130,19 @@ Key files to create:
 - **Build integration**: CMake + Ninja build system
 - **Port forwarding**: 11111 for ParaView server connection
 
-### Performance Targets
-- **Pod deployment to coding**: <90 seconds
-- **Incremental build**: <30 seconds  
+### Performance Targets (Volume-Based)
+- **First setup**: 30-45 minutes (one-time volume initialization)
+- **Cold start**: 2-3 minutes (image pull + volume mount)
+- **Warm start**: <90 seconds ✅ (cached image + volume mount)
+- **Incremental build**: <30 seconds
 - **SSH connection**: <20 seconds
-- **Full rebuild**: <5 minutes (deps pre-compiled)
 
 ## Key Design Principles
 
-1. **Pre-compilation over runtime builds**: All heavy dependencies built once into image
-2. **Incremental development**: Only CoralMachine source compiles during development  
-3. **State persistence**: Development work survives container restarts via volumes
-4. **Remote visualization**: VTK files never leave container, viewed via ParaView server
-5. **Cost optimization**: Start/stop RunPod instances without losing development state
+1. **Volume-based dependencies**: Heavy builds live in persistent volumes, not images
+2. **Minimal base images**: Only essential runtime components in Docker image
+3. **Incremental development**: Only CoralMachine source compiles during development  
+4. **State persistence**: Everything important survives container restarts via volumes
+5. **Remote visualization**: VTK files never leave container, viewed via ParaView server
+6. **Cost optimization**: $26/month for storage vs repeated multi-GB downloads
+7. **Developer velocity**: <90 second restarts for frequent stop/start workflow

@@ -1,0 +1,65 @@
+version: '3.8'
+
+services:
+  # One-time setup service to populate the volume
+  setup:
+    build:
+      context: ..
+      dockerfile: volume-based/docker/Dockerfile.setup
+    volumes:
+      - coral-deps:/workspace/deps
+      - coral-workspace:/workspace
+    command: /setup-volume.sh
+    profiles:
+      - setup
+
+  # Main development container (minimal, fast startup)
+  dev:
+    build:
+      context: ..
+      dockerfile: volume-based/docker/Dockerfile.base
+    image: coral-dev:volume-based
+    hostname: coral-dev
+    volumes:
+      - coral-deps:/workspace/deps:ro  # Dependencies (read-only)
+      - coral-workspace:/workspace      # Working directory
+      - ./source:/workspace/source      # Optional: bind-mount local source
+    ports:
+      - "2222:22"                    # SSH (public access needed)
+      - "127.0.0.1:11111:11111"      # ParaView server (localhost only for security)
+    environment:
+      # ParaView configuration
+      - START_PVSERVER=true
+      - PV_BACKEND=egl  # egl (GPU accelerated) | xvfb (software) | none
+      - PV_SERVER_PORT=11111
+      - MPI_PROCESSES=1
+      - PV_FORCE_OFFSCREEN=true
+      # Git/build configuration
+      - AUTO_CLONE=false  # Set to true if you want auto git clone/pull
+      - AUTO_BUILD=false  # Set to true for auto-build on startup
+      - CORAL_REPO_URL=${CORAL_REPO_URL:-}
+      - REPO_BRANCH=main
+      # NVIDIA GPU configuration
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+    # GPU support for Docker Compose v2
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    profiles:
+      - dev
+
+volumes:
+  # Persistent volume for compiled dependencies (~25GB)
+  coral-deps:
+    name: coral-deps
+    driver: local
+
+  # Persistent workspace for source, builds, cache (~150GB)  
+  coral-workspace:
+    name: coral-workspace
+    driver: local

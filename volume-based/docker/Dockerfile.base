@@ -1,0 +1,123 @@
+# Minimal Base Image for Coral Machine Development
+# ~5GB image that mounts pre-built dependencies from volume
+# Optimized for fast RunPod spin-up times
+
+FROM nvcr.io/nvidia/nvhpc:24.7-devel-cuda12.5-ubuntu22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-lc"]
+
+# Essential packages only - heavy deps will come from volume
+RUN apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* && \
+    apt-get update --allow-insecure-repositories && \
+    apt-get install -y --allow-unauthenticated --reinstall --no-install-recommends \
+    ca-certificates ubuntu-keyring curl gnupg && \
+    apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*
+
+# Dev tools + SSH for optimal developer experience
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    sudo openssh-server \
+    cmake ninja-build ccache git git-lfs \
+    vim-tiny nano htop ncdu tree jq \
+    zsh tmux curl wget rsync unzip \
+    netcat-openbsd iputils-ping net-tools \
+    libeigen3-dev \
+    # Graphics libs for: ParaView server (headless) + Polyscope (X11 forwarding)
+    libegl1 libgl1 libopengl0 \
+    libglfw3 libglm-dev \
+    # Minimal X11 for pvserver compatibility + xvfb fallback
+    libx11-6 libxrender1 xvfb \
+    tini \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
+
+# Non-root user for dev work (using zsh for better DX)
+RUN groupadd -g 1000 dev \
+ && useradd -m -u 1000 -g 1000 -s /bin/zsh dev \
+ && usermod -aG sudo dev \
+ && echo "dev ALL=(ALL) NOPASSWD:ALL" >/etc/sudoers.d/dev
+
+# SSH daemon configuration
+RUN mkdir -p /var/run/sshd \
+ && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
+ && sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config \
+ && sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+ && sed -i 's@^#\?AuthorizedKeysFile .*@AuthorizedKeysFile .ssh/authorized_keys@' /etc/ssh/sshd_config \
+ && sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config \
+ && sed -i 's/^#\?UsePAM .*/UsePAM yes/' /etc/ssh/sshd_config \
+ && echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config
+
+# Create mount points for volume
+RUN mkdir -p /workspace /workspace/deps /workspace/source /workspace/build /workspace/vtk \
+ && chown -R dev:dev /workspace
+
+# Environment setup for volume-mounted dependencies
+ENV PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/bin:${PATH}"
+ENV PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/comm_libs/mpi/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/lib:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/math_libs/lib64:${LD_LIBRARY_PATH}"
+ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/cuda/lib64:${LD_LIBRARY_PATH}"
+
+# Volume-aware environment variables (will point to mounted deps)
+ENV PATH="/workspace/deps/paraview/bin:${PATH}"
+ENV LD_LIBRARY_PATH="/workspace/deps/paraview/lib:${LD_LIBRARY_PATH}"
+ENV CMAKE_PREFIX_PATH="/workspace/deps"
+ENV PALABOS_ROOT="/workspace/deps/palabos-hybrid"
+ENV CCACHE_DIR="/workspace/.ccache"
+ENV CCACHE_MAXSIZE="10G"
+ENV OPAL_PREFIX="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/comm_libs/12.5/hpcx/hpcx-2.19/ompi"
+ENV OMPI_MCA_orte_tmpdir_base="/tmp"
+ENV NVIDIA_VISIBLE_DEVICES="all"
+ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
+
+# Setup /etc/environment for SSH sessions
+RUN echo 'PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/bin:/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/comm_libs/mpi/bin:/workspace/deps/paraview/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"' > /etc/environment && \
+    echo 'LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/lib:/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/math_libs/lib64:/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/cuda/lib64:/workspace/deps/paraview/lib"' >> /etc/environment && \
+    echo 'CMAKE_PREFIX_PATH="/workspace/deps"' >> /etc/environment && \
+    echo 'PALABOS_ROOT="/workspace/deps/palabos-hybrid"' >> /etc/environment && \
+    echo 'CCACHE_DIR="/workspace/.ccache"' >> /etc/environment && \
+    echo 'CCACHE_MAXSIZE="10G"' >> /etc/environment
+
+# Setup dev user with zsh configuration
+USER dev
+RUN mkdir -p ~/.ssh && chmod 700 ~/.ssh && \
+    touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys && \
+    # zsh configuration (primary shell)
+    echo 'export PS1="%n@coral-dev %~ %# "' >> ~/.zshrc && \
+    echo 'alias ll="ls -la"' >> ~/.zshrc && \
+    echo 'alias gs="git status"' >> ~/.zshrc && \
+    # bash configuration (fallback)
+    echo 'export PS1="\u@coral-dev:\w\$ "' >> ~/.bashrc && \
+    echo 'alias ll="ls -la"' >> ~/.bashrc && \
+    echo 'alias gs="git status"' >> ~/.bashrc
+
+USER root
+
+# Copy SSH keys if provided
+COPY --chown=dev:dev authorized_keys* /tmp/
+RUN if [ -f /tmp/authorized_keys ]; then \
+        cp /tmp/authorized_keys /home/dev/.ssh/authorized_keys && \
+        chmod 600 /home/dev/.ssh/authorized_keys && \
+        chown dev:dev /home/dev/.ssh/authorized_keys; \
+    fi && \
+    rm -f /tmp/authorized_keys*
+
+# Copy startup script (will be modified to check for volume)
+COPY volume-based/scripts/startup.sh /usr/local/bin/startup.sh
+RUN chmod +x /usr/local/bin/startup.sh
+
+WORKDIR /workspace
+
+# Ports: SSH & ParaView
+EXPOSE 22 11111
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=10 \
+  CMD nc -z localhost 22 || exit 1
+
+# Switch back to dev user for security (SSH runs as root initially, then drops privileges)
+USER dev
+
+# Use tini as PID 1
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sudo", "-E", "/usr/local/bin/startup.sh"]
