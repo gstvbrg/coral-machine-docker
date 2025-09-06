@@ -58,13 +58,38 @@ else
     else
         echo "⚠️  Palabos-hybrid not found in volume"
     fi
+    
+    if [ -d "/workspace/deps/nvidia-hpc" ]; then
+        echo "✓ NVIDIA HPC SDK found"
+        which nvc++ >/dev/null 2>&1 && echo "✓ nvc++ compiler available" || echo "⚠️  nvc++ not in PATH"
+    else
+        echo "⚠️  NVIDIA HPC SDK not found in volume"
+    fi
 fi
 
-# ========== Update Paths for Volume-Based Dependencies ==========
-export PATH="/workspace/deps/paraview/bin:$PATH"
-export LD_LIBRARY_PATH="/workspace/deps/paraview/lib:$LD_LIBRARY_PATH"
-export CMAKE_PREFIX_PATH="/workspace/deps"
-export PALABOS_ROOT="/workspace/deps/palabos-hybrid"
+# ========== Load Environment from Volume ==========
+if [ -f "/workspace/deps/env.sh" ]; then
+    echo "✅ Loading environment from volume"
+    source /workspace/deps/env.sh
+    
+    # Update /etc/environment for SSH sessions
+    cat > /etc/environment << EOF
+PATH="${PATH}"
+LD_LIBRARY_PATH="${LD_LIBRARY_PATH}"
+CMAKE_PREFIX_PATH="${CMAKE_PREFIX_PATH}"
+PALABOS_ROOT="${PALABOS_ROOT}"
+CCACHE_DIR="${CCACHE_DIR}"
+CCACHE_MAXSIZE="${CCACHE_MAXSIZE}"
+CUDA_HOME="${CUDA_HOME}"
+NVHPC_ROOT="${NVHPC_ROOT}"
+EOF
+else
+    echo "⚠️  Volume environment script not found - using defaults"
+    export PATH="/workspace/deps/paraview/bin:$PATH"
+    export LD_LIBRARY_PATH="/workspace/deps/paraview/lib:$LD_LIBRARY_PATH"
+    export CMAKE_PREFIX_PATH="/workspace/deps"
+    export PALABOS_ROOT="/workspace/deps/palabos-hybrid"
+fi
 
 # ========== Initialize ccache ==========
 if [ ! -d "/workspace/.ccache" ]; then
@@ -119,9 +144,17 @@ start_pv() {
     return 1
   fi
 
-  # Build pvserver command
+  # Build pvserver command - use ParaView's bundled MPI to avoid ABI mismatches
   if [[ "${MPI_PROCESSES}" -gt 1 ]]; then
-    PVSERVER_CMD="mpirun --allow-run-as-root -np ${MPI_PROCESSES} /workspace/deps/paraview/bin/pvserver"
+    # Prefer ParaView's mpiexec if available
+    if [ -x "/workspace/deps/paraview/bin/mpiexec" ]; then
+      PV_MPIRUN="/workspace/deps/paraview/bin/mpiexec"
+      echo "Using ParaView's bundled MPI launcher"
+    else
+      PV_MPIRUN="mpirun --allow-run-as-root"
+      echo "Using system MPI launcher (fallback)"
+    fi
+    PVSERVER_CMD="${PV_MPIRUN} -np ${MPI_PROCESSES} /workspace/deps/paraview/bin/pvserver"
     echo "🧪 Starting parallel pvserver (${MPI_PROCESSES} processes) on port ${PV_SERVER_PORT}"
   else  
     PVSERVER_CMD="/workspace/deps/paraview/bin/pvserver"

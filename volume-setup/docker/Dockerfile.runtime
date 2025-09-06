@@ -1,0 +1,115 @@
+# Runtime image for Coral Machine Development
+# Minimal image that uses pre-built dependencies from volume
+# Based on CUDA runtime for GPU support
+
+FROM nvidia/cuda:12.5.0-runtime-ubuntu22.04
+
+# Configurable user settings
+ARG USERNAME=coral-dev
+ARG USER_UID=1000
+ARG USER_GID=1000
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-lc"]
+
+# Runtime dependencies only - all build tools are in the volume
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core system
+    sudo \
+    openssh-server \
+    ca-certificates \
+    # Git for source management  
+    git \
+    git-lfs \
+    # Minimal dev tools
+    vim-tiny \
+    nano \
+    htop \
+    tree \
+    # Shell
+    zsh \
+    tmux \
+    # Graphics runtime libs (for ParaView/visualization)
+    libegl1 \
+    libgl1 \
+    libopengl0 \
+    libglfw3 \
+    libx11-6 \
+    libxrender1 \
+    libxcursor1 \
+    xvfb \
+    # Process management
+    tini \
+    # Networking
+    netcat-openbsd \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Create non-root user
+RUN groupadd -g ${USER_GID} ${USERNAME} \
+    && useradd -m -u ${USER_UID} -g ${USER_GID} -s /bin/zsh ${USERNAME} \
+    && usermod -aG sudo ${USERNAME} \
+    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME}
+
+# Configure SSH daemon
+RUN mkdir -p /var/run/sshd \
+    && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config \
+    && echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config
+
+# Create mount points
+RUN mkdir -p /workspace/deps /workspace/source /workspace/build /workspace/vtk /workspace/.ccache \
+    && chown -R ${USERNAME}:${USERNAME} /workspace
+
+# Environment defaults
+ENV CMAKE_PREFIX_PATH="/workspace/deps"
+ENV CCACHE_DIR="/workspace/.ccache"
+ENV NVIDIA_VISIBLE_DEVICES="all"
+ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
+
+# Setup user environment
+USER ${USERNAME}
+
+# Configure shells to source environment
+RUN mkdir -p ~/.ssh && chmod 700 ~/.ssh \
+    && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys \
+    && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> ~/.zshrc \
+    && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> ~/.bashrc \
+    && echo 'export PS1="%n@%m %~ %# "' >> ~/.zshrc \
+    && echo 'export PS1="\u@\h:\w\$ "' >> ~/.bashrc \
+    && echo 'alias ll="ls -la"' >> ~/.zshrc \
+    && echo 'alias ll="ls -la"' >> ~/.bashrc \
+    && echo 'alias gs="git status"' >> ~/.zshrc \
+    && echo 'alias gs="git status"' >> ~/.bashrc
+
+USER root
+
+# Copy startup script
+COPY docker/startup.sh /usr/local/bin/startup.sh
+RUN chmod +x /usr/local/bin/startup.sh
+
+# Copy SSH keys if provided
+COPY --chown=${USER_UID}:${USER_GID} authorized_keys* /tmp/
+RUN if [ -f /tmp/authorized_keys ]; then \
+        cp /tmp/authorized_keys /home/${USERNAME}/.ssh/authorized_keys && \
+        chmod 600 /home/${USERNAME}/.ssh/authorized_keys && \
+        chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh/authorized_keys; \
+    fi && \
+    rm -f /tmp/authorized_keys*
+
+WORKDIR /workspace
+
+# Ports
+EXPOSE 22 11111
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
+    CMD nc -z localhost 22 || exit 1
+
+USER ${USERNAME}
+
+# Use tini for proper signal handling
+ENTRYPOINT ["/usr/bin/tini", "--"]
+CMD ["sudo", "-E", "/usr/local/bin/startup.sh"]

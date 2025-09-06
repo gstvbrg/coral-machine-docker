@@ -1,0 +1,31 @@
+# Local environment configuration
+.env
+
+# Volume directories (local bind mounts)
+volumes/
+volumes/deps/
+volumes/workspace/
+
+# Build artifacts
+*.log
+*.tmp
+.cache/
+
+# IDE files
+.vscode/
+.idea/
+
+# Docker build cache
+.docker/
+
+# SSH keys (never commit these!)
+authorized_keys
+*.key
+*.pem
+id_rsa*
+id_ed25519*
+
+# Backup files
+*.backup
+*.bak
+*~

@@ -2,34 +2,25 @@
 # This builds all heavy dependencies into a persistent volume
 # Run once to initialize the volume, then use Dockerfile.base for daily work
 
-FROM nvcr.io/nvidia/nvhpc:24.7-devel-cuda12.5-ubuntu22.04
+FROM ubuntu:22.04
 
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-lc"]
 
 # Build essentials for compiling dependencies
-RUN apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/* && \
-    apt-get update --allow-insecure-repositories && \
-    apt-get install -y --allow-unauthenticated --reinstall --no-install-recommends \
-    ca-certificates ubuntu-keyring curl gnupg && \
-    apt-get clean && rm -rf /var/cache/apt/archives/* /var/lib/apt/lists/*
-
-# Development packages needed for building
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    cmake ninja-build git wget curl \
+    # Build tools
+    build-essential cmake ninja-build ccache \
+    git wget curl ca-certificates \
+    # MPI for Palabos fallback build
+    libopenmpi-dev openmpi-bin \
+    # Required for building
     libeigen3-dev \
     libgl1-mesa-dev libglfw3-dev libglm-dev \
     libegl1 libgl1 libopengl0 \
+    # Python for ParaView
+    python3 python3-dev \
  && rm -rf /var/lib/apt/lists/*
-
-# Set up environment for builds
-ENV PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/bin:${PATH}"
-ENV PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/comm_libs/mpi/bin:${PATH}"
-ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/compilers/lib:${LD_LIBRARY_PATH}"
-ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/math_libs/lib64:${LD_LIBRARY_PATH}"
-ENV LD_LIBRARY_PATH="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/cuda/lib64:${LD_LIBRARY_PATH}"
-ENV OPAL_PREFIX="/opt/nvidia/hpc_sdk/Linux_x86_64/24.7/comm_libs/12.5/hpcx/hpcx-2.19/ompi"
-ENV OMPI_MCA_orte_tmpdir_base="/tmp"
 
 # Create workspace structure
 RUN mkdir -p /workspace/deps /workspace/source /workspace/build /workspace/.ccache /workspace/vtk

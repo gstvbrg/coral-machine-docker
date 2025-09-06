@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  # Service for initial volume setup
+  setup:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+    profiles: ["setup"]
+    volumes:
+      - coral-deps:/workspace/deps
+      - coral-workspace:/workspace
+    environment:
+      # Allow customization via environment variables
+      - INSTALL_NVIDIA_HPC=${INSTALL_NVIDIA_HPC:-true}
+      - INSTALL_PARAVIEW=${INSTALL_PARAVIEW:-true}
+      - INSTALL_PALABOS=${INSTALL_PALABOS:-true}
+      - INSTALL_GEOMETRY_CENTRAL=${INSTALL_GEOMETRY_CENTRAL:-true}
+      - INSTALL_POLYSCOPE=${INSTALL_POLYSCOPE:-true}
+    # Run as root for installation
+    user: root
+    stdin_open: true
+    tty: true
+
+  # Service for running individual installers
+  installer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+    profiles: ["installer"]
+    volumes:
+      - coral-deps:/workspace/deps
+      - coral-workspace:/workspace
+    user: root
+    stdin_open: true
+    tty: true
+    # Command specified at runtime
+
+  # Development runtime container
+  dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runtime
+      args:
+        USERNAME: ${USERNAME:-coral-dev}
+        USER_UID: ${USER_UID:-1000}
+        USER_GID: ${USER_GID:-1000}
+    profiles: ["dev"]
+    hostname: coral-dev
+    volumes:
+      - coral-deps:/workspace/deps:ro  # Dependencies are read-only
+      - coral-workspace:/workspace
+      - ~/.ssh/authorized_keys:/tmp/authorized_keys:ro
+    ports:
+      - "2222:22"      # SSH
+      - "11111:11111"  # ParaView server
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+
+  # Test service to validate installation
+  test:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+    profiles: ["test"]
+    volumes:
+      - coral-deps:/workspace/deps:ro
+      - coral-workspace:/workspace:ro
+    command: ["/workspace/deps/test-installation.sh"]
+    
+  # Service for cleaning/resetting volumes
+  clean:
+    image: alpine:latest
+    profiles: ["maintenance"]
+    volumes:
+      - coral-deps:/deps
+      - coral-workspace:/workspace
+    command: |
+      sh -c "
+        echo 'WARNING: This will delete all data in the volumes!'
+        echo 'Press Ctrl+C within 5 seconds to cancel...'
+        sleep 5
+        echo 'Cleaning volumes...'
+        rm -rf /deps/* /deps/.[!.]* /deps/..?*
+        rm -rf /workspace/* /workspace/.[!.]* /workspace/..?*
+        echo 'Volumes cleaned'
+      "
+
+volumes:
+  coral-deps:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${DEPS_VOLUME_PATH:-./volumes/deps}
+  
+  coral-workspace:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WORKSPACE_VOLUME_PATH:-./volumes/workspace}
+
+networks:
+  default:
+    name: coral-network
