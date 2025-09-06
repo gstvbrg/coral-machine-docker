@@ -54,7 +54,7 @@ make dev
 # 5. Connect via SSH
 ssh coral-dev@localhost -p 2222
 # 5.5
-make ssh
+make ssh/c
 
 # Or open shell directly
 make shell

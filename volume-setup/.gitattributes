@@ -1,0 +1,5 @@
+# Force LF line endings for files that will run in Linux containers
+*.sh text eol=lf
+*.env text eol=lf
+Makefile text eol=lf
+config.env text eol=lf

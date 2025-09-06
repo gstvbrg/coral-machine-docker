@@ -34,9 +34,17 @@ install_palabos() {
     sed -i -E 's|^[[:space:]]*add_subdirectory[[:space:]]*\([[:space:]]*examples/|# DISABLED: &|g' CMakeLists.txt
     
     # Configure with CMake
-    # Note: Using g++ for Palabos as it's more reliable with their CMake setup
+    # Use system g++ + system MPI for reliable Palabos build
+    # NVIDIA compilers will be used later for actual CFD development
     mkdir -p build
     cd build
+    
+    # Install system MPI for building (if not already available)
+    if ! command -v mpirun &> /dev/null; then
+        log_info "Installing system MPI for build..."
+        apt-get update && apt-get install -y libopenmpi-dev
+    fi
+    
     cmake .. \
         -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
         -DCMAKE_CXX_COMPILER="${DEFAULT_CXX_COMPILER}" \

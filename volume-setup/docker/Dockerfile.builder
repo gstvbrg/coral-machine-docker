@@ -47,15 +47,19 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Create build user with same UID as volume (1000)
-RUN useradd -m -u 1000 -g 1000 -s /bin/bash builder \
+RUN groupadd -g 1000 builder \
+    && useradd -m -u 1000 -g 1000 -s /bin/bash builder \
     && echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/builder
 
 # Copy setup scripts into image
 # This makes the image self-contained for RunPod deployment
 COPY . /opt/volume-setup/
 
-# Ensure scripts are executable
-RUN chmod +x /opt/volume-setup/*.sh \
+# Fix line endings and ensure scripts are executable
+# This is critical for Windows development where files may have CRLF endings
+RUN find /opt/volume-setup -type f \( -name "*.sh" -o -name "*.env" -o -name "config.env" -o -name "Makefile" \) \
+    -exec sed -i 's/\r$//' {} \; \
+    && chmod +x /opt/volume-setup/*.sh \
     && chmod +x /opt/volume-setup/installers/*.sh \
     && chown -R builder:builder /opt/volume-setup
 
