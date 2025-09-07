@@ -39,16 +39,28 @@ install_palabos() {
     mkdir -p build
     cd build
     
-    # Install system MPI for building (if not already available)
-    if ! command -v mpirun &> /dev/null; then
-        log_info "Installing system MPI for build..."
-        apt-get update && apt-get install -y libopenmpi-dev
+    # Install system MPI for building Palabos with g++
+    # NOTE: NVIDIA HPC SDK includes its own MPI, but Palabos needs system MPI for g++ builds
+    # Force installation every time to ensure it's available
+    log_info "Installing system MPI for Palabos build with g++..."
+    apt-get update && apt-get install -y libopenmpi-dev openmpi-bin
+    
+    # Verify MPI installation
+    if [ ! -f "/usr/bin/mpicc" ]; then
+        log_error "System MPI installation failed - mpicc not found"
     fi
+    log_info "System MPI installed at: $(which mpicc)"
+    
+    # Configure with system MPI paths to avoid NVIDIA MPI confusion
+    export MPI_C_COMPILER=/usr/bin/mpicc
+    export MPI_CXX_COMPILER=/usr/bin/mpicxx
     
     cmake .. \
         -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
         -DCMAKE_CXX_COMPILER="${DEFAULT_CXX_COMPILER}" \
         -DCMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}" \
+        -DMPI_C_COMPILER=/usr/bin/mpicc \
+        -DMPI_CXX_COMPILER=/usr/bin/mpicxx \
         -DPALABOS_ENABLE_MPI=ON \
         -DPALABOS_ENABLE_CUDA=OFF \
         -DBUILD_HDF5=OFF \
@@ -110,19 +122,38 @@ install_geometry_central() {
     clone_repo "${GEOMETRY_CENTRAL_REPO}" "geometry-central" "geometry-central"
     cd geometry-central
     
-    # Configure with CMake
+    # Configure with CMake - install to temp location first
     mkdir -p build
     cd build
     cmake .. \
         -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
         -DCMAKE_CXX_COMPILER="${DEFAULT_CXX_COMPILER}" \
         -DCMAKE_CXX_STANDARD=17 \
-        -DCMAKE_INSTALL_PREFIX="${DEPS_ROOT}" \
+        -DCMAKE_INSTALL_PREFIX="/tmp/geometry-central-install" \
         -G Ninja
     
-    # Build and install
+    # Build and install to temp location
     log_info "Building geometry-central..."
     ninja -j${BUILD_JOBS} install
+    
+    # Move to flat directory structure in deps
+    log_info "Installing geometry-central to flat directory structure..."
+    if [ -d "/tmp/geometry-central-install" ]; then
+        # Copy library to standard lib directory
+        if [ -f "/tmp/geometry-central-install/lib/libgeometry-central.a" ]; then
+            cp "/tmp/geometry-central-install/lib/libgeometry-central.a" "${DEPS_LIB}/"
+            log_success "Installed libgeometry-central.a to ${DEPS_LIB}/"
+        fi
+        
+        # Copy headers to standard include directory
+        if [ -d "/tmp/geometry-central-install/include/geometrycentral" ]; then
+            cp -r "/tmp/geometry-central-install/include/geometrycentral" "${DEPS_INCLUDE}/"
+            log_success "Installed geometry-central headers to ${DEPS_INCLUDE}/geometrycentral/"
+        fi
+        
+        # Clean up temp directory
+        rm -rf "/tmp/geometry-central-install"
+    fi
     
     # Verify installation
     verify_file_exists "${DEPS_LIB}/libgeometry-central.a" "geometry-central library"

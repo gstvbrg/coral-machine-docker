@@ -37,7 +37,6 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libxi-dev \
     libxext-dev \
     libtbb-dev \
-    libhdf5-dev \
     # Runtime for testing
     xvfb \
     # Utilities

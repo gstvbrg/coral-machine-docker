@@ -251,12 +251,42 @@ chown -R 1000:1000 /workspace
 
 ## Design Principles
 
-1. **Single Source of Truth**: All configuration in `config.env`
+1. **Single Source of Truth**: `.env` is master config, `config.env` uses environment variables with fallbacks
 2. **Fail Fast**: Scripts exit on first error
 3. **Idempotent**: Can run multiple times safely
 4. **Clear Output**: Consistent logging with emoji indicators
 5. **Flat Structure**: Everything in standard bin/, lib/, include/ locations
 6. **User-Friendly**: Clear messages and progress indicators
+
+## Configuration Architecture
+
+**Problem Solved**: Previously had conflicting configuration in two files (.env and config.env) leading to inconsistent build settings and variable naming conflicts.
+
+**Solution Implemented**: Single Source of Truth pattern
+- `.env` = Master configuration file (used by Docker Compose)
+- `config.env` = Uses environment variables from .env with intelligent fallbacks
+- **Clear precedence**: .env values override config.env defaults
+
+**Benefits**:
+- ✅ Zero configuration duplication or conflicts
+- ✅ Single place to change settings (.env file)
+- ✅ Docker Compose and bash scripts use identical values
+- ✅ Environment variables can override any setting
+- ✅ Maintains backward compatibility
+
+**Example Flow**:
+```bash
+# .env (master)
+BUILD_JOBS=8
+CMAKE_BUILD_TYPE=Release
+
+# Docker Compose passes to container
+- BUILD_JOBS=${BUILD_JOBS:-8}
+
+# config.env uses environment with fallbacks
+export BUILD_JOBS=${BUILD_JOBS:-$(nproc)}
+export CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-"Release"}
+```
 
 ## Time Estimates
 

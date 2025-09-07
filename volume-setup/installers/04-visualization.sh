@@ -22,6 +22,10 @@ install_paraview() {
         return 0
     fi
     
+    # Install xvfb for headless software rendering
+    log_info "Installing xvfb for headless rendering support..."
+    install_apt_packages xvfb
+    
     cd /tmp
     
     # Determine architecture
@@ -48,7 +52,7 @@ install_paraview() {
     log_info "Installing ParaView to standard locations..."
     [ -d "${PV_DIR}/bin" ] && cp -r ${PV_DIR}/bin/* "${DEPS_BIN}/" 2>/dev/null || true
     [ -d "${PV_DIR}/lib" ] && cp -r ${PV_DIR}/lib/* "${DEPS_LIB}/" 2>/dev/null || true
-    [ -d "${PV_DIR}/include" ] && cp -r ${PV_DIR}/include/* "${DEPS_INCLUDE}/" 2>/dev/null || true
+    [ -d "${PV_DIR}/include" ] && mkdir -p "${DEPS_INCLUDE}/paraview" && cp -r ${PV_DIR}/include/* "${DEPS_INCLUDE}/paraview/" 2>/dev/null || true
     [ -d "${PV_DIR}/share" ] && cp -r ${PV_DIR}/share/* "${DEPS_SHARE}/" 2>/dev/null || true
     
     # Remove GUI applications (keep only server components)
@@ -85,7 +89,7 @@ EOF
     if ldd "${DEPS_BIN}/pvserver" 2>/dev/null | grep -q libEGL; then
         log_success "ParaView supports EGL rendering"
     else
-        log_warning "ParaView using software rendering (install xvfb for headless)"
+        log_info "ParaView using software rendering via xvfb (installed)"
     fi
     
     # Verify installation

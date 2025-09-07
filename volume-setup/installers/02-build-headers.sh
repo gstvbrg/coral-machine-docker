@@ -29,8 +29,7 @@ install_apt_packages \
     libxcursor-dev \
     libxi-dev \
     libxext-dev \
-    libtbb-dev \
-    libhdf5-dev
+    libtbb-dev
 
 # Copy Eigen3 headers
 if [ "${INSTALL_EIGEN3}" == "true" ]; then
@@ -53,20 +52,16 @@ done
 copy_headers "/usr/include/tbb" "TBB"
 copy_headers "/usr/include/oneapi" "oneAPI TBB"
 
-# Copy HDF5 headers (for scientific data I/O)
-if [ -d "/usr/include/hdf5/serial" ]; then
-    log_info "Copying HDF5 headers..."
-    cp -r /usr/include/hdf5/serial/* "${DEPS_INCLUDE}/" 2>/dev/null || true
-    log_success "HDF5 headers installed"
-fi
+# HDF5 headers removed - only needed for Palabos examples we don't compile
+# Saves space and reduces complexity
 
 # Copy essential shared libraries that might be needed at runtime
 log_info "Copying essential runtime libraries..."
+# TBB might be needed by ParaView for parallel rendering
 copy_libraries "libtbb.so*" "TBB libraries"
-copy_libraries "libhdf5*.so*" "HDF5 libraries"
+# HDF5 removed - not needed without Palabos examples
 
-# Create pkg-config directory
-mkdir -p "${DEPS_LIB}/pkgconfig"
+# pkg-config directory removed - not used in our build system
 
 # Update environment file with include paths
 log_info "Updating environment configuration..."
@@ -75,9 +70,6 @@ cat >> "${DEPS_ROOT}/env.sh" << 'EOF'
 # Include paths for compilation
 export CPLUS_INCLUDE_PATH="${DEPS_INCLUDE}:${DEPS_INCLUDE}/eigen3:${CPLUS_INCLUDE_PATH:-}"
 export C_INCLUDE_PATH="${DEPS_INCLUDE}:${C_INCLUDE_PATH:-}"
-
-# pkg-config support
-export PKG_CONFIG_PATH="${DEPS_LIB}/pkgconfig:${PKG_CONFIG_PATH:-}"
 EOF
 
 # Verify critical headers
@@ -113,4 +105,3 @@ log_info "  - Eigen3 (linear algebra)"
 log_info "  - OpenGL/GLU (graphics)"
 log_info "  - X11 (windowing)"
 log_info "  - TBB (parallelization)"
-log_info "  - HDF5 (data I/O)"

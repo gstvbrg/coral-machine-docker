@@ -41,9 +41,16 @@ rm -f "${NVHPC_ARCHIVE}"
 NVHPC_DIR=$(ls -d nvhpc_* | head -n1)
 cd "${NVHPC_DIR}"
 
+# Ensure the target directory doesn't exist (installer may fail otherwise)
+if [ -d "${DEPS_ROOT}/nvidia-hpc" ]; then
+    log_info "Removing existing NVIDIA HPC installation..."
+    rm -rf "${DEPS_ROOT}/nvidia-hpc"
+fi
+
 # Create expect script for automated installation
-log_info "Preparing automated installation..."
-cat > /tmp/install_nvhpc.exp << 'EXPECT_SCRIPT'
+# Note: We DON'T quote EXPECT_SCRIPT so ${DEPS_ROOT} is expanded NOW
+log_info "Preparing automated installation to ${DEPS_ROOT}/nvidia-hpc..."
+cat > /tmp/install_nvhpc.exp << EXPECT_SCRIPT
 #!/usr/bin/expect -f
 set timeout -1
 spawn ./install
@@ -52,25 +59,28 @@ send "\r"
 expect "Please choose install option:"
 send "1\r"
 expect "Installation directory?"
-send "\r"
+send "${DEPS_ROOT}/nvidia-hpc\r"
 expect eof
 EXPECT_SCRIPT
 
 chmod +x /tmp/install_nvhpc.exp
 
-# Run automated installation to default location
-log_info "Installing NVIDIA HPC SDK (this will take 10-15 minutes)..."
+# Run automated installation directly to target location
+log_info "Installing NVIDIA HPC SDK directly to: ${DEPS_ROOT}/nvidia-hpc"
+log_info "This avoids moving 13GB of files after installation"
 /tmp/install_nvhpc.exp
 
-# Move from default location to our volume
-log_info "Moving NVIDIA HPC SDK to persistent volume..."
-if [ -d "/opt/nvidia/hpc_sdk" ]; then
-    # Remove any existing installation
-    rm -rf "${DEPS_ROOT}/nvidia-hpc"
-    mv /opt/nvidia/hpc_sdk "${DEPS_ROOT}/nvidia-hpc"
-    log_success "NVIDIA HPC SDK moved to ${DEPS_ROOT}/nvidia-hpc"
+# Verify installation succeeded
+if [ -d "${DEPS_ROOT}/nvidia-hpc/Linux_x86_64" ]; then
+    log_success "NVIDIA HPC SDK installed directly to ${DEPS_ROOT}/nvidia-hpc"
+    # Clean up examples and docs to save space (several GB)
+    log_info "Removing unnecessary examples and documentation to save space..."
+    rm -rf "${DEPS_ROOT}/nvidia-hpc/Linux_x86_64/${NVIDIA_HPC_VERSION}/examples" 2>/dev/null || true
+    rm -rf "${DEPS_ROOT}/nvidia-hpc/Linux_x86_64/${NVIDIA_HPC_VERSION}/doc" 2>/dev/null || true
+    # Also remove CUDA samples if present
+    rm -rf "${DEPS_ROOT}/nvidia-hpc/Linux_x86_64/${NVIDIA_HPC_VERSION}/cuda/samples" 2>/dev/null || true
 else
-    log_error "NVIDIA HPC SDK installation failed - not found at /opt/nvidia/hpc_sdk"
+    log_error "NVIDIA HPC SDK installation failed - not found at ${DEPS_ROOT}/nvidia-hpc"
 fi
 
 # Clean up

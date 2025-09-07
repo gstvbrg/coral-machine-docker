@@ -11,12 +11,22 @@ services:
       - coral-deps:/workspace/deps
       - coral-workspace:/workspace
     environment:
-      # Allow customization via environment variables
+      # Pass all configuration from .env (single source of truth)
+      - BUILD_JOBS=${BUILD_JOBS:-8}
+      - CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}
+      - CCACHE_SIZE=${CCACHE_SIZE:-10G}
+      - NVIDIA_HPC_VERSION=${NVIDIA_HPC_VERSION:-24.7}
+      - PARAVIEW_VERSION=${PARAVIEW_VERSION:-6.0.0}
+      - CUDA_VERSION=${CUDA_VERSION:-12.5}
+      - USER_UID=${USER_UID:-1000}
+      - USER_GID=${USER_GID:-1000}
       - INSTALL_NVIDIA_HPC=${INSTALL_NVIDIA_HPC:-true}
       - INSTALL_PARAVIEW=${INSTALL_PARAVIEW:-true}
       - INSTALL_PALABOS=${INSTALL_PALABOS:-true}
       - INSTALL_GEOMETRY_CENTRAL=${INSTALL_GEOMETRY_CENTRAL:-true}
       - INSTALL_POLYSCOPE=${INSTALL_POLYSCOPE:-true}
+      - INSTALL_EIGEN3=${INSTALL_EIGEN3:-true}
+      - INSTALL_GL_HEADERS=${INSTALL_GL_HEADERS:-true}
     # Run as root for installation
     user: root
     stdin_open: true
@@ -31,6 +41,23 @@ services:
     volumes:
       - coral-deps:/workspace/deps
       - coral-workspace:/workspace
+    environment:
+      # Pass all configuration from .env (single source of truth)
+      - BUILD_JOBS=${BUILD_JOBS:-8}
+      - CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}
+      - CCACHE_SIZE=${CCACHE_SIZE:-10G}
+      - NVIDIA_HPC_VERSION=${NVIDIA_HPC_VERSION:-24.7}
+      - PARAVIEW_VERSION=${PARAVIEW_VERSION:-6.0.0}
+      - CUDA_VERSION=${CUDA_VERSION:-12.5}
+      - USER_UID=${USER_UID:-1000}
+      - USER_GID=${USER_GID:-1000}
+      - INSTALL_NVIDIA_HPC=${INSTALL_NVIDIA_HPC:-true}
+      - INSTALL_PARAVIEW=${INSTALL_PARAVIEW:-true}
+      - INSTALL_PALABOS=${INSTALL_PALABOS:-true}
+      - INSTALL_GEOMETRY_CENTRAL=${INSTALL_GEOMETRY_CENTRAL:-true}
+      - INSTALL_POLYSCOPE=${INSTALL_POLYSCOPE:-true}
+      - INSTALL_EIGEN3=${INSTALL_EIGEN3:-true}
+      - INSTALL_GL_HEADERS=${INSTALL_GL_HEADERS:-true}
     user: root
     stdin_open: true
     tty: true
