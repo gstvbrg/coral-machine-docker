@@ -89,27 +89,38 @@ rm -rf "${NVHPC_DIR}" /tmp/install_nvhpc.exp
 
 # Update environment file
 log_info "Updating environment configuration..."
-cat >> "${DEPS_ROOT}/env.sh" << 'EOF'
+cat >> "${DEPS_ROOT}/env.sh" << EOF
 
 # NVIDIA HPC SDK
-export NVHPC_ROOT="${DEPS_ROOT}/nvidia-hpc/Linux_x86_64/24.7"
-export PATH="${NVHPC_ROOT}/compilers/bin:$PATH"
-export PATH="${NVHPC_ROOT}/comm_libs/mpi/bin:$PATH"
-export LD_LIBRARY_PATH="${NVHPC_ROOT}/compilers/lib:$LD_LIBRARY_PATH"
-export LD_LIBRARY_PATH="${NVHPC_ROOT}/math_libs/lib64:$LD_LIBRARY_PATH"
-export LD_LIBRARY_PATH="${NVHPC_ROOT}/cuda/lib64:$LD_LIBRARY_PATH"
+export NVHPC_ROOT="${DEPS_ROOT}/nvidia-hpc/Linux_x86_64/${NVIDIA_HPC_VERSION}"
+export PATH="\${NVHPC_ROOT}/compilers/bin:\$PATH"
+export LD_LIBRARY_PATH="\${NVHPC_ROOT}/compilers/lib:\$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="\${NVHPC_ROOT}/math_libs/lib64:\$LD_LIBRARY_PATH"
+export LD_LIBRARY_PATH="\${NVHPC_ROOT}/cuda/lib64:\$LD_LIBRARY_PATH"
 
 # CUDA
-export CUDA_HOME="${NVHPC_ROOT}/cuda"
-export PATH="${CUDA_HOME}/bin:$PATH"
+export CUDA_HOME="\${NVHPC_ROOT}/cuda"
+export PATH="\${CUDA_HOME}/bin:\$PATH"
+
+# Use NVIDIA's OpenMPI (not system MPI)
+export MPI_ROOT="\${NVHPC_ROOT}/comm_libs/12.5/openmpi4/openmpi-4.1.5"
+export PATH="\${MPI_ROOT}/bin:\$PATH"
+export LD_LIBRARY_PATH="\${MPI_ROOT}/lib:\$LD_LIBRARY_PATH"
 
 # MPI Configuration
-export OPAL_PREFIX="${NVHPC_ROOT}/comm_libs/12.5/hpcx/hpcx-2.19/ompi"
 export OMPI_MCA_orte_tmpdir_base="/tmp"
 
 # GPU Support
 export NVIDIA_VISIBLE_DEVICES="all"
 export NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
+
+# Build system preferences
+export CMAKE_GENERATOR="Ninja"
+export CCACHE_DISABLE=1  # Disable ccache for nvc++ (causes issues with CUDA)
+
+# Compiler preferences
+export CC="\${NVHPC_ROOT}/compilers/bin/nvc"
+export CXX="\${NVHPC_ROOT}/compilers/bin/nvc++"
 EOF
 
 # Verify installation

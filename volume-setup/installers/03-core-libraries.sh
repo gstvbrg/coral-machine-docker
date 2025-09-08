@@ -25,9 +25,12 @@ install_palabos() {
     cd /tmp
     rm -rf palabos-hybrid
     
-    # Clone repository
-    clone_repo "${PALABOS_REPO}" "palabos-hybrid" "Palabos-hybrid"
+    # Clone from GitHub (now with NVHPC support in main CMakeLists.txt)
+    log_info "Cloning Palabos-hybrid from GitHub..."
+    git clone https://github.com/gstvbrg/palabos-hybrid-prerelease.git palabos-hybrid
     cd palabos-hybrid
+    
+    log_info "Using palabos-hybrid with NVHPC support from GitHub"
     
     # Disable examples to speed up build
     log_info "Configuring Palabos build..."
@@ -39,34 +42,35 @@ install_palabos() {
     mkdir -p build
     cd build
     
-    # Install system MPI for building Palabos with g++
-    # NOTE: NVIDIA HPC SDK includes its own MPI, but Palabos needs system MPI for g++ builds
-    # Force installation every time to ensure it's available
-    log_info "Installing system MPI for Palabos build with g++..."
-    apt-get update && apt-get install -y libopenmpi-dev openmpi-bin
+    # Set up environment for nvc++ and NVIDIA MPI
+    log_info "Configuring Palabos build with nvc++ and NVIDIA OpenMPI..."
     
-    # Verify MPI installation
-    if [ ! -f "/usr/bin/mpicc" ]; then
-        log_error "System MPI installation failed - mpicc not found"
+    # Source the environment to get NVIDIA paths
+    source "${DEPS_ROOT}/env.sh"
+    
+    # Verify nvc++ is available
+    if ! command -v nvc++ &> /dev/null; then
+        log_error "nvc++ not found in PATH. Please ensure NVIDIA HPC SDK is installed."
     fi
-    log_info "System MPI installed at: $(which mpicc)"
     
-    # Configure with system MPI paths to avoid NVIDIA MPI confusion
-    export MPI_C_COMPILER=/usr/bin/mpicc
-    export MPI_CXX_COMPILER=/usr/bin/mpicxx
+    log_info "Using nvc++ from: $(which nvc++)"
+    log_info "Building WITHOUT MPI to avoid C++ bindings issues (GPU parallelism via -stdpar)"
     
+    # Configure with nvc++ WITHOUT MPI to avoid C++ bindings issues
+    # For MPI support, users should follow GPU examples pattern (rebuild from source)
     cmake .. \
+        -G Ninja \
         -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
-        -DCMAKE_CXX_COMPILER="${DEFAULT_CXX_COMPILER}" \
+        -DCMAKE_CXX_COMPILER=nvc++ \
+        -DCMAKE_C_COMPILER=nvc \
         -DCMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}" \
-        -DMPI_C_COMPILER=/usr/bin/mpicc \
-        -DMPI_CXX_COMPILER=/usr/bin/mpicxx \
-        -DPALABOS_ENABLE_MPI=ON \
+        -DCMAKE_CXX_FLAGS="-O3 -stdpar -std=c++20 -Msingle -Mfcon -fopenmp -DUSE_CUDA_MALLOC" \
+        -DENABLE_MPI=OFF \
+        -DPALABOS_ENABLE_MPI=OFF \
         -DPALABOS_ENABLE_CUDA=OFF \
         -DBUILD_HDF5=OFF \
         -DBUILD_EXAMPLES=OFF \
-        -DBUILD_TESTING=OFF \
-        -G Ninja
+        -DBUILD_TESTING=OFF
     
     # Build library
     log_info "Building Palabos (this will take 10-15 minutes)..."

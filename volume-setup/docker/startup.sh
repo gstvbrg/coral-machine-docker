@@ -17,6 +17,18 @@ else
     exit 1
 fi
 
+# Fix ccache permissions (critical for compilation)
+echo "🔧 Fixing ccache permissions..."
+if [ -d "/workspace/.ccache" ]; then
+    sudo chown -R ${USER}:${USER} /workspace/.ccache
+    sudo chmod -R 755 /workspace/.ccache
+    echo "✅ ccache permissions fixed"
+else
+    mkdir -p /workspace/.ccache
+    sudo chown -R ${USER}:${USER} /workspace/.ccache
+    echo "✅ ccache directory created"
+fi
+
 # Check if volume is initialized
 if [ -f "/workspace/deps/.setup-complete" ]; then
     echo "✅ Volume initialized: $(cat /workspace/deps/.setup-complete)"

@@ -12,15 +12,28 @@ ARG USER_GID=1000
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-lc"]
 
-# Runtime dependencies only - all build tools are in the volume
+# Runtime dependencies and essential build tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core system
     sudo \
     openssh-server \
     ca-certificates \
+    # Essential tools for downloading/extracting
+    curl \
+    wget \
+    unzip \
+    # Essential build tools
+    binutils \
+    build-essential \
+    cmake \
+    ninja-build \
+    ccache \
     # Git for source management  
     git \
     git-lfs \
+    # Debugging tools for C++ development
+    gdb \
+    valgrind \
     # Minimal dev tools
     vim-tiny \
     nano \
@@ -29,6 +42,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Shell
     zsh \
     tmux \
+    # File operations
+    rsync \
     # Graphics runtime libs (for ParaView/visualization)
     libegl1 \
     libgl1 \
@@ -40,8 +55,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     xvfb \
     # Process management
     tini \
-    # Networking
+    # Networking tools
     netcat-openbsd \
+    iputils-ping \
+    net-tools \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 

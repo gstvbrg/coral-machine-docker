@@ -1,4 +1,3 @@
-version: '3.8'
 
 services:
   # Service for initial volume setup
@@ -41,6 +40,7 @@ services:
     volumes:
       - coral-deps:/workspace/deps
       - coral-workspace:/workspace
+      - ../ref:/opt/volume-setup/ref
     environment:
       # Pass all configuration from .env (single source of truth)
       - BUILD_JOBS=${BUILD_JOBS:-8}
@@ -69,7 +69,7 @@ services:
       context: .
       dockerfile: docker/Dockerfile.runtime
       args:
-        USERNAME: ${USERNAME:-coral-dev}
+        USERNAME: gstvbrg
         USER_UID: ${USER_UID:-1000}
         USER_GID: ${USER_GID:-1000}
     profiles: ["dev"]
