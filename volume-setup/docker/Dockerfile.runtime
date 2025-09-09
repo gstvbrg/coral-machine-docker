@@ -85,6 +85,8 @@ ENV CMAKE_PREFIX_PATH="/workspace/deps"
 ENV CCACHE_DIR="/workspace/.ccache"
 ENV NVIDIA_VISIBLE_DEVICES="all"
 ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
+# Set hostname for prompt (with tilde for style)
+ENV HOSTNAME="coral~machine"
 
 # Setup user environment
 USER ${USERNAME}
@@ -94,8 +96,10 @@ RUN mkdir -p ~/.ssh && chmod 700 ~/.ssh \
     && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys \
     && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> ~/.zshrc \
     && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> ~/.bashrc \
-    && echo 'export PS1="%n@%m %~ %# "' >> ~/.zshrc \
-    && echo 'export PS1="\u@\h:\w\$ "' >> ~/.bashrc \
+    && echo 'export PS1="%n@coral~machine:%~ %# "' >> ~/.zshrc \
+    && echo 'export PS1="\u@coral~machine:\w\$ "' >> ~/.bashrc \
+    && echo 'export HOSTNAME="coral~machine"' >> ~/.zshrc \
+    && echo 'export HOSTNAME="coral~machine"' >> ~/.bashrc \
     && echo 'alias ll="ls -la"' >> ~/.zshrc \
     && echo 'alias ll="ls -la"' >> ~/.bashrc \
     && echo 'alias gs="git status"' >> ~/.zshrc \

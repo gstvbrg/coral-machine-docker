@@ -1,0 +1,33 @@
+# RunPod Configuration File
+# This replaces docker-compose.yml for RunPod deployments
+
+[pod]
+name = "coral-machine-dev"
+template_id = ""  # Will be filled after template creation
+
+[container]
+image = "gstvbrg/coral-runtime:latest"
+command = "/usr/local/bin/startup.sh"
+disk_size = 20  # GB
+
+[volume]
+# Network volume must be created separately first
+volume_id = ""  # Fill with your volume ID after creation
+mount_path = "/workspace"
+
+[gpu]
+type = "RTX 4090"  # or "RTX 3090", "A100", etc.
+count = 1
+
+[ports]
+expose = ["22/tcp", "11111/tcp"]
+
+[environment]
+NVIDIA_VISIBLE_DEVICES = "all"
+NVIDIA_DRIVER_CAPABILITIES = "compute,utility,graphics"
+# These vars will set the prompt correctly
+HOSTNAME = "coral~machine"
+PS1 = "\\u@coral~machine:\\w\\$ "
+
+[ssh]
+public_key = ""  # Added via RunPod account settings

@@ -35,9 +35,9 @@ help:
 
 # Prepare volume directories
 prep:
-	@echo "Creating volume directories..."
-	@mkdir -p volumes/deps volumes/workspace
-	@echo "Volume directories created"
+	@echo "Creating volume directory structure..."
+	@mkdir -p volumes/workspace/deps volumes/workspace/source volumes/workspace/build volumes/workspace/vtk
+	@echo "Volume directory structure created"
 
 # Run full setup
 setup: prep

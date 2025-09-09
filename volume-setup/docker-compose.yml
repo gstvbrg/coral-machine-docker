@@ -7,7 +7,6 @@ services:
       dockerfile: docker/Dockerfile.builder
     profiles: ["setup"]
     volumes:
-      - coral-deps:/workspace/deps
       - coral-workspace:/workspace
     environment:
       # Pass all configuration from .env (single source of truth)
@@ -38,7 +37,6 @@ services:
       dockerfile: docker/Dockerfile.builder
     profiles: ["installer"]
     volumes:
-      - coral-deps:/workspace/deps
       - coral-workspace:/workspace
       - ../ref:/opt/volume-setup/ref
     environment:
@@ -75,8 +73,7 @@ services:
     profiles: ["dev"]
     hostname: coral-dev
     volumes:
-      - coral-deps:/workspace/deps:ro  # Dependencies are read-only
-      - coral-workspace:/workspace
+      - coral-workspace:/workspace  # Single volume contains everything including deps/
       - ~/.ssh/authorized_keys:/tmp/authorized_keys:ro
     ports:
       - "2222:22"      # SSH
@@ -101,8 +98,7 @@ services:
       dockerfile: docker/Dockerfile.builder
     profiles: ["test"]
     volumes:
-      - coral-deps:/workspace/deps:ro
-      - coral-workspace:/workspace:ro
+      - coral-workspace:/workspace:ro  # Single volume, read-only for testing
     command: ["/workspace/deps/test-installation.sh"]
     
   # Service for cleaning/resetting volumes
@@ -110,27 +106,18 @@ services:
     image: alpine:latest
     profiles: ["maintenance"]
     volumes:
-      - coral-deps:/deps
       - coral-workspace:/workspace
     command: |
       sh -c "
-        echo 'WARNING: This will delete all data in the volumes!'
+        echo 'WARNING: This will delete all data in the volume!'
         echo 'Press Ctrl+C within 5 seconds to cancel...'
         sleep 5
-        echo 'Cleaning volumes...'
-        rm -rf /deps/* /deps/.[!.]* /deps/..?*
+        echo 'Cleaning volume...'
         rm -rf /workspace/* /workspace/.[!.]* /workspace/..?*
-        echo 'Volumes cleaned'
+        echo 'Volume cleaned'
       "
 
 volumes:
-  coral-deps:
-    driver: local
-    driver_opts:
-      type: none
-      o: bind
-      device: ${DEPS_VOLUME_PATH:-./volumes/deps}
-  
   coral-workspace:
     driver: local
     driver_opts:

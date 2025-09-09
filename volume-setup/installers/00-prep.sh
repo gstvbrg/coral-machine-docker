@@ -79,7 +79,7 @@ export PATH="${DEPS_BIN}:$PATH"
 export LD_LIBRARY_PATH="${DEPS_LIB}:$LD_LIBRARY_PATH"
 export LIBRARY_PATH="${DEPS_LIB}:$LIBRARY_PATH"
 
-echo "Coral Machine environment loaded"
+echo "oh sexy powerful muses, use and abuse me"
 EOF
 
 chmod +x "${DEPS_ROOT}/env.sh"
