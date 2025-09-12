@@ -79,10 +79,22 @@ export PATH="${DEPS_BIN}:$PATH"
 export LD_LIBRARY_PATH="${DEPS_LIB}:$LD_LIBRARY_PATH"
 export LIBRARY_PATH="${DEPS_LIB}:$LIBRARY_PATH"
 
-echo "oh sexy powerful muses, use and abuse me"
 EOF
 
 chmod +x "${DEPS_ROOT}/env.sh"
+
+# Copy management scripts to persistent location
+log_info "Installing management scripts..."
+
+mkdir -p "${DEPS_ROOT}/scripts"
+if [ -d "/opt/volume-setup/scripts" ]; then
+    cp -f /opt/volume-setup/scripts/*.sh "${DEPS_ROOT}/scripts/" 2>/dev/null || true
+    chmod +x "${DEPS_ROOT}/scripts/"*.sh 2>/dev/null || true
+    log_success "Scripts installed to ${DEPS_ROOT}/scripts/"
+fi
+
+# Create runtime directory for service management
+mkdir -p "${DEPS_ROOT}/runtime"
 
 # Mark as complete
 mark_installed "build-environment"
@@ -92,4 +104,6 @@ log_info "Directory structure:"
 log_info "  ${DEPS_BIN}/ - Executables"
 log_info "  ${DEPS_LIB}/ - Libraries"
 log_info "  ${DEPS_INCLUDE}/ - Headers"
+log_info "  ${DEPS_ROOT}/scripts/ - Management scripts"
+log_info "  ${DEPS_ROOT}/runtime/ - Runtime files"
 log_info "  ${CCACHE_DIR}/ - Build cache"

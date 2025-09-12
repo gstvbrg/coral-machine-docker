@@ -26,11 +26,18 @@ check_volume_mounted
 if [ -f "${DEPS_ROOT}/.setup-complete" ]; then
     log_warning "Volume appears to be already set up"
     log_info "To re-run setup, remove ${DEPS_ROOT}/.setup-complete"
-    read -p "Continue anyway? (y/N): " -n 1 -r
-    echo
-    if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-        log_info "Setup cancelled"
+    
+    # Non-interactive mode for RunPod (check for RUNPOD env var or CI env var)
+    if [ -n "${RUNPOD}" ] || [ -n "${CI}" ] || [ -n "${NONINTERACTIVE}" ]; then
+        log_info "Non-interactive mode - skipping already initialized volume"
         exit 0
+    else
+        read -p "Continue anyway? (y/N): " -n 1 -r
+        echo
+        if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+            log_info "Setup cancelled"
+            exit 0
+        fi
     fi
 fi
 

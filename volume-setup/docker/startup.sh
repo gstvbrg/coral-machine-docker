@@ -6,9 +6,9 @@ set -e
 
 echo "🚀 Starting Coral Machine Development Environment"
 
-# Start SSH daemon
+# Start SSH daemon (no sudo needed as root)
 echo "📡 Starting SSH daemon..."
-sudo service ssh start
+service ssh start
 
 if [ $? -eq 0 ]; then
     echo "✅ SSH daemon started successfully"
@@ -17,17 +17,15 @@ else
     exit 1
 fi
 
-# Fix ccache permissions (critical for compilation)
-echo "🔧 Fixing ccache permissions..."
-if [ -d "/workspace/.ccache" ]; then
-    sudo chown -R ${USER}:${USER} /workspace/.ccache
-    sudo chmod -R 755 /workspace/.ccache
-    echo "✅ ccache permissions fixed"
-else
+# Ensure ccache directory exists (running as root now)
+echo "🔧 Setting up ccache directory..."
+if [ ! -d "/workspace/.ccache" ]; then
     mkdir -p /workspace/.ccache
-    sudo chown -R ${USER}:${USER} /workspace/.ccache
     echo "✅ ccache directory created"
+else
+    echo "✅ ccache directory exists"
 fi
+chmod -R 755 /workspace/.ccache
 
 # Check if volume is initialized
 if [ -f "/workspace/deps/.setup-complete" ]; then
@@ -52,17 +50,17 @@ else
     echo "   docker-compose --profile setup run setup"
 fi
 
-# Update /etc/environment for SSH sessions
+# Update /etc/environment for SSH sessions (no sudo needed as root)
 if [ -f "/workspace/deps/env.sh" ]; then
     echo "📝 Updating SSH environment..."
     # Extract key variables and write to /etc/environment
-    sudo bash -c 'source /workspace/deps/env.sh && env | grep -E "^(PATH|LD_LIBRARY_PATH|CMAKE_PREFIX_PATH|CUDA_HOME|NVHPC_ROOT)=" > /etc/environment'
+    bash -c 'source /workspace/deps/env.sh && env | grep -E "^(PATH|LD_LIBRARY_PATH|CMAKE_PREFIX_PATH|CUDA_HOME|NVHPC_ROOT)=" > /etc/environment'
 fi
 
 echo ""
 echo "========================================="
 echo "Development environment ready!"
-echo "SSH: ssh ${USER}@localhost -p 2222"
+echo "SSH: ssh root@localhost -p 2222"
 echo "========================================="
 
 # Keep container running

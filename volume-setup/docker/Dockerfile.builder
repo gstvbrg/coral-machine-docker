@@ -17,7 +17,8 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     # Version control
     git \
     git-lfs \
-    # Download tools
+    # Download tools (aria2 for RunPod optimization)
+    aria2 \
     wget \
     curl \
     ca-certificates \
@@ -62,14 +63,17 @@ RUN find /opt/volume-setup -type f \( -name "*.sh" -o -name "*.env" -o -name "co
     && chmod +x /opt/volume-setup/installers/*.sh \
     && chown -R builder:builder /opt/volume-setup
 
-# Create workspace mount points
+# Create workspace mount points with organized output structure
 RUN mkdir -p /workspace/deps /workspace/source /workspace/build \
+    /workspace/output/vtk /workspace/output/data /workspace/output/images \
+    /workspace/output/checkpoints /workspace/output/logs \
     && chown -R builder:builder /workspace
 
 WORKDIR /opt/volume-setup
 
-# Run as builder user by default (can override with --user root if needed)
-USER builder
+# Run as root for setup (builder needs to install packages)
+# This is safe because this container is only used for initial setup
+# USER builder  # Commented out - run as root for package installation
 
 # Default command runs full setup
 CMD ["./setup.sh"]

@@ -1,5 +1,6 @@
 # SSH keys - NEVER commit these
 authorized_keys
+volume-setup/authorized_keys
 *.pem
 *.key
 id_rsa*

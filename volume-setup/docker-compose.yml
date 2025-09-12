@@ -16,8 +16,6 @@ services:
       - NVIDIA_HPC_VERSION=${NVIDIA_HPC_VERSION:-24.7}
       - PARAVIEW_VERSION=${PARAVIEW_VERSION:-6.0.0}
       - CUDA_VERSION=${CUDA_VERSION:-12.5}
-      - USER_UID=${USER_UID:-1000}
-      - USER_GID=${USER_GID:-1000}
       - INSTALL_NVIDIA_HPC=${INSTALL_NVIDIA_HPC:-true}
       - INSTALL_PARAVIEW=${INSTALL_PARAVIEW:-true}
       - INSTALL_PALABOS=${INSTALL_PALABOS:-true}
@@ -47,8 +45,6 @@ services:
       - NVIDIA_HPC_VERSION=${NVIDIA_HPC_VERSION:-24.7}
       - PARAVIEW_VERSION=${PARAVIEW_VERSION:-6.0.0}
       - CUDA_VERSION=${CUDA_VERSION:-12.5}
-      - USER_UID=${USER_UID:-1000}
-      - USER_GID=${USER_GID:-1000}
       - INSTALL_NVIDIA_HPC=${INSTALL_NVIDIA_HPC:-true}
       - INSTALL_PARAVIEW=${INSTALL_PARAVIEW:-true}
       - INSTALL_PALABOS=${INSTALL_PALABOS:-true}
@@ -66,12 +62,8 @@ services:
     build:
       context: .
       dockerfile: docker/Dockerfile.runtime
-      args:
-        USERNAME: gstvbrg
-        USER_UID: ${USER_UID:-1000}
-        USER_GID: ${USER_GID:-1000}
     profiles: ["dev"]
-    hostname: coral-dev
+    hostname: coral-machine
     volumes:
       - coral-workspace:/workspace  # Single volume contains everything including deps/
       - ~/.ssh/authorized_keys:/tmp/authorized_keys:ro

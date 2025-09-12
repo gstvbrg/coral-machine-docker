@@ -64,7 +64,7 @@ install_palabos() {
         -DCMAKE_CXX_COMPILER=nvc++ \
         -DCMAKE_C_COMPILER=nvc \
         -DCMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}" \
-        -DCMAKE_CXX_FLAGS="-O3 -stdpar -std=c++20 -Msingle -Mfcon -fopenmp -DUSE_CUDA_MALLOC" \
+        -DCMAKE_CXX_FLAGS="-O3 -stdpar=gpu -gpu=cc80,cc86,cc89,cc90,cc100 -std=c++20 -Msingle -Mfcon -fopenmp -DUSE_CUDA_MALLOC" \
         -DENABLE_MPI=OFF \
         -DPALABOS_ENABLE_MPI=OFF \
         -DPALABOS_ENABLE_CUDA=OFF \

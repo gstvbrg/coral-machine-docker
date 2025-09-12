@@ -1,13 +1,10 @@
 # Runtime image for Coral Machine Development
 # Minimal image that uses pre-built dependencies from volume
-# Based on CUDA runtime for GPU support
+# CUDA is provided by the mounted NVIDIA HPC SDK - no CUDA base image needed!
 
-FROM nvidia/cuda:12.5.0-runtime-ubuntu22.04
+FROM ubuntu:22.04
 
-# Configurable user settings
-ARG USERNAME=coral-dev
-ARG USER_UID=1000
-ARG USER_GID=1000
+# Running as root for RunPod deployment simplicity
 
 ENV DEBIAN_FRONTEND=noninteractive
 SHELL ["/bin/bash", "-lc"]
@@ -15,7 +12,6 @@ SHELL ["/bin/bash", "-lc"]
 # Runtime dependencies and essential build tools
 RUN apt-get update && apt-get install -y --no-install-recommends \
     # Core system
-    sudo \
     openssh-server \
     ca-certificates \
     # Essential tools for downloading/extracting
@@ -59,64 +55,84 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     netcat-openbsd \
     iputils-ping \
     net-tools \
+    # Networking utilities
+    iproute2 \
+    dnsutils \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Create non-root user
-RUN groupadd -g ${USER_GID} ${USERNAME} \
-    && useradd -m -u ${USER_UID} -g ${USER_GID} -s /bin/zsh ${USERNAME} \
-    && usermod -aG sudo ${USERNAME} \
-    && echo "${USERNAME} ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/${USERNAME}
+# Install Tailscale (concise official installer)
+RUN curl -fsSL https://tailscale.com/install.sh | sh \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
 
 # Configure SSH daemon
 RUN mkdir -p /var/run/sshd \
     && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
-    && sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin no/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config \
     && sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
     && sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config \
     && echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config
 
-# Create mount points
-RUN mkdir -p /workspace/deps /workspace/source /workspace/build /workspace/vtk /workspace/.ccache \
-    && chown -R ${USERNAME}:${USERNAME} /workspace
+# Create mount points with organized output structure
+RUN mkdir -p /workspace/deps /workspace/source /workspace/build /workspace/.ccache \
+    /workspace/output/vtk /workspace/output/data /workspace/output/images \
+    /workspace/output/checkpoints /workspace/output/logs
 
 # Environment defaults
 ENV CMAKE_PREFIX_PATH="/workspace/deps"
 ENV CCACHE_DIR="/workspace/.ccache"
 ENV NVIDIA_VISIBLE_DEVICES="all"
 ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
-# Set hostname for prompt (with tilde for style)
+# Set hostname for prompt
 ENV HOSTNAME="coral~machine"
+# Control which startup script to use (set to "runpod" for RunPod deployment)
+ENV STARTUP_MODE="default"
+ # Ensure Tini reaps zombies even if not PID 1 (RunPod may wrap entrypoint)
+ENV TINI_SUBREAPER=1
 
-# Setup user environment
-USER ${USERNAME}
+# Configure root shell environment (since we'll run as root in RunPod)
+RUN echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> /root/.bashrc \
+    && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> /root/.zshrc \
+    && echo 'export PS1="\[\033[01;31m\]\u@coral~machine\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> /root/.bashrc \
+    && echo 'export PS1="%F{red}%n@coral~machine%f:%F{blue}%~%f %# "' >> /root/.zshrc \
+    && echo 'export HOSTNAME="coral~machine"' >> /root/.bashrc \
+    && echo 'export HOSTNAME="coral~machine"' >> /root/.zshrc \
+    && echo 'alias ll="ls -la"' >> /root/.bashrc \
+    && echo 'alias ll="ls -la"' >> /root/.zshrc \
+    && echo 'alias gs="git status"' >> /root/.bashrc \
+    && echo 'alias gs="git status"' >> /root/.zshrc \
+    && echo '[ -f /etc/motd ] && cat /etc/motd' >> /root/.bashrc \
+    && echo '[ -f /etc/motd ] && cat /etc/motd' >> /root/.zshrc
 
-# Configure shells to source environment
-RUN mkdir -p ~/.ssh && chmod 700 ~/.ssh \
-    && touch ~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys \
-    && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> ~/.zshrc \
-    && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> ~/.bashrc \
-    && echo 'export PS1="%n@coral~machine:%~ %# "' >> ~/.zshrc \
-    && echo 'export PS1="\u@coral~machine:\w\$ "' >> ~/.bashrc \
-    && echo 'export HOSTNAME="coral~machine"' >> ~/.zshrc \
-    && echo 'export HOSTNAME="coral~machine"' >> ~/.bashrc \
-    && echo 'alias ll="ls -la"' >> ~/.zshrc \
-    && echo 'alias ll="ls -la"' >> ~/.bashrc \
-    && echo 'alias gs="git status"' >> ~/.zshrc \
-    && echo 'alias gs="git status"' >> ~/.bashrc
+# Create MOTD (Message of the Day) for terminal sessions
+RUN cat > /etc/motd << 'EOF'
+Coral Machine Development Environment
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+Quick Commands:
+  coral-help  - Show all available commands
+  paraview    - Start ParaView server
+  check-env   - Verify environment setup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+O RADIANT MUSES ~ MAKE ME YOUR INSTRUMENT
+EOF
 
-USER root
+# Setup root SSH directory for potential key-based access
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh \
+    && touch /root/.ssh/authorized_keys && chmod 600 /root/.ssh/authorized_keys
 
-# Copy startup script
+# Copy startup scripts (both regular and RunPod version)
 COPY docker/startup.sh /usr/local/bin/startup.sh
-RUN chmod +x /usr/local/bin/startup.sh
+COPY docker/startup-runpod.sh /usr/local/bin/startup-runpod.sh
+# Fix line endings (in case of Windows development) and make executable
+RUN sed -i 's/\r$//' /usr/local/bin/startup.sh /usr/local/bin/startup-runpod.sh \
+    && chmod +x /usr/local/bin/startup.sh /usr/local/bin/startup-runpod.sh
 
-# Copy SSH keys if provided
-COPY --chown=${USER_UID}:${USER_GID} authorized_keys* /tmp/
+# Copy SSH keys if provided (to root's .ssh)
+COPY authorized_keys* /tmp/
 RUN if [ -f /tmp/authorized_keys ]; then \
-        cp /tmp/authorized_keys /home/${USERNAME}/.ssh/authorized_keys && \
-        chmod 600 /home/${USERNAME}/.ssh/authorized_keys && \
-        chown ${USERNAME}:${USERNAME} /home/${USERNAME}/.ssh/authorized_keys; \
+        cp /tmp/authorized_keys /root/.ssh/authorized_keys && \
+        chmod 600 /root/.ssh/authorized_keys; \
     fi && \
     rm -f /tmp/authorized_keys*
 
@@ -129,8 +145,18 @@ EXPOSE 22 11111
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
     CMD nc -z localhost 22 || exit 1
 
-USER ${USERNAME}
+# Create startup dispatcher script that selects the right startup based on STARTUP_MODE
+RUN printf '#!/bin/bash\n\
+if [ "$STARTUP_MODE" = "runpod" ]; then\n\
+    exec /usr/local/bin/startup-runpod.sh\n\
+else\n\
+    exec /usr/local/bin/startup.sh\n\
+fi\n' > /usr/local/bin/startup-dispatcher.sh && \
+    chmod +x /usr/local/bin/startup-dispatcher.sh
 
-# Use tini for proper signal handling
-ENTRYPOINT ["/usr/bin/tini", "--"]
-CMD ["sudo", "-E", "/usr/local/bin/startup.sh"]
+# Stay as root for RunPod deployment (aligns with SSH access)
+USER root
+
+# Use tini for proper signal handling (subreaper to handle non-PID1 cases)
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
+CMD ["/usr/local/bin/startup-dispatcher.sh"]
