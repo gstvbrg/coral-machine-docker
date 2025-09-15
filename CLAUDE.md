@@ -6,23 +6,24 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 This repository builds Docker development environments for coral machine simulation (PORAG) optimized for RunPod GPU workstations. The project uses a **modular volume-based architecture** to achieve <90 seconds from deployment to full development productivity.
 
-## Current Architecture: Modular Volume Setup
+## Current Architecture: Single Volume Setup
 
 ### Version Configuration
-- **CUDA**: 12.6.2
-- **NVIDIA HPC SDK**: 24.11 (NOTE: Blackwell/cc100 requires SDK 25.3+)
+- **CUDA**: 12.9
+- **NVIDIA HPC SDK**: 25.7 (Supports Blackwell/cc100)
+- **ParaView**: 6.0.0
 - **Supported GPU Architectures**:
   - cc80: Ampere (A100, A6000, RTX 3090)
   - cc86: Ampere (RTX 3080, 3070, 3060)
   - cc89: Ada Lovelace (RTX 4090, 4080, L40S)
   - cc90: Hopper (H100, H200)
-  - ~~cc100: Blackwell (B200, B100)~~ **Requires HPC SDK 25.3+**
+  - cc100: Blackwell (B200, B100) ✅ **Now supported with SDK 25.7**
 
-### Testing Strategy
-We are currently testing in **volume-setup/** directory with a modular installer system. This approach uses:
+### Production Architecture
+The **volume-setup/** directory contains the production-ready modular installer system. This approach uses:
 1. **Builder image (~1GB)**: Contains build tools, used only during setup
-2. **Runtime image (~500MB)**: Minimal runtime environment for development
-3. **Persistent volumes**: Pre-compiled dependencies stored in volumes
+2. **Runtime image (~500MB)**: Minimal runtime environment with Tailscale integration
+3. **Single persistent volume**: All dependencies and workspace in one volume for RunPod compatibility
 
 ### Benefits
 - **Modular installation**: Each component has its own installer script
@@ -31,27 +32,42 @@ We are currently testing in **volume-setup/** directory with a modular installer
 - **Cost efficient**: $26/month for persistent storage vs repeated downloads
 - **Perfect for development**: Frequent stop/start workflow supported
 
-### Volume Structure (Testing Phase)
+### Volume Structure (Production)
 ```
-volume-setup/volumes/
-├── deps/                   # All dependencies installed here for testing
+/workspace/                  # Single volume mount point (RunPod compatible)
+├── deps/                   # All dependencies (~15GB)
 │   ├── bin/               # All executables (pvserver, etc.)
 │   ├── lib/               # All libraries (libpalabos.a, etc.)
 │   ├── include/           # All headers (organized in subdirectories)
 │   │   ├── eigen3/        # Eigen3 math library
-│   │   ├── hdf5/          # HDF5 headers (in subdirectory)
+│   │   ├── hdf5/          # HDF5 headers
 │   │   ├── palabos/       # Palabos CFD headers
 │   │   ├── geometrycentral/  # Geometry processing
 │   │   ├── paraview/      # ParaView headers
 │   │   └── polyscope/     # Visualization headers
 │   ├── share/             # Shared data files
-│   ├── nvidia-hpc/        # NVIDIA HPC SDK (special case, not flattened)
+│   ├── nvidia-hpc/        # NVIDIA HPC SDK (special case)
+│   ├── scripts/           # Custom utility scripts
+│   ├── runtime/           # Persistent runtime state
+│   │   ├── cursor-server/ # Cursor IDE server cache
+│   │   ├── vscode-server/ # VSCode server cache
+│   │   ├── tailscale/     # Tailscale state
+│   │   └── xdg/          # XDG base directories
 │   ├── env.sh             # Environment setup script
 │   └── .installed/        # Marker files for idempotency
-└── workspace/             # Separate workspace volume (for testing)
+├── source/                 # Git repositories
+├── build/                  # Build artifacts
+├── output/                 # Organized output
+│   ├── vtk/               # VTK visualization files
+│   ├── data/              # Simulation data
+│   ├── images/            # Screenshots/renders
+│   ├── checkpoints/       # Simulation checkpoints
+│   └── logs/              # Application logs
+├── .ccache/               # Compiler cache
+└── .ssh/                  # SSH keys and config
+    ├── authorized_keys    # SSH public keys
+    └── ssh_host_*_key     # Persistent host keys
 ```
-
-**Future Production Structure**: Single volume where deps/ becomes a subdirectory of /workspace/
 
 ## Repository Structure
 
@@ -66,11 +82,13 @@ coral-machine-docker/
 │   │   ├── 01-compilers.sh     # NVIDIA HPC SDK
 │   │   ├── 02-build-headers.sh # Development headers
 │   │   ├── 03-core-libraries.sh # Palabos, geometry-central
-│   │   └── 04-visualization.sh  # ParaView, Polyscope
+│   │   ├── 04-visualization.sh  # ParaView, Polyscope
+│   │   └── 05-scripts.sh        # Custom utility scripts
 │   ├── docker/
 │   │   ├── Dockerfile.builder  # Build environment
 │   │   ├── Dockerfile.runtime  # Development environment
-│   │   └── startup.sh
+│   │   ├── startup.sh          # Default startup script
+│   │   └── startup-runpod.sh   # RunPod-specific startup
 │   ├── docker-compose.yml
 │   ├── Makefile        # Convenient commands
 │   └── README.md
@@ -93,7 +111,7 @@ make dev
 # Connect via SSH
 make ssh
 # or
-ssh coral-dev@localhost -p 2222
+ssh root@localhost -p 2222
 
 # Open shell directly
 make shell
@@ -119,15 +137,19 @@ make install-compilers  # Install NVIDIA HPC SDK
 make install-headers    # Install build headers
 make install-libraries  # Build core libraries (Palabos, geometry-central)
 make install-viz        # Install visualization tools (ParaView, Polyscope)
+make install-scripts    # Install custom utility scripts
 ```
 
 ### Maintenance Commands
 ```bash
 make test          # Test installation
 make status        # Show container/volume status
-make logs          # View setup logs
+make logs          # View container logs
 make clean         # Remove all data (careful!)
 make rebuild       # Rebuild Docker images
+make stop          # Stop all containers
+make down          # Remove containers (keep volumes)
+make reset         # Full reset: clean + setup + dev
 ```
 
 ### Development Workflow
@@ -165,11 +187,12 @@ watch -n 1 nvidia-smi
 
 ## Implementation Status
 
-**Current Phase**: Testing modular volume-setup approach locally
-**Architecture**: Modular installer system with separate builder/runtime images
+**Current Phase**: Production-ready, deployed on RunPod
+**Architecture**: Single volume with modular installer system
 
 ### Completed
-- ✅ Modular installer architecture (5 separate scripts)
+- ✅ Single volume architecture (RunPod compatible)
+- ✅ Modular installer architecture (6 scripts)
 - ✅ Central configuration system (config.env)
 - ✅ Builder and runtime Docker images
 - ✅ Docker Compose orchestration
@@ -177,27 +200,39 @@ watch -n 1 nvidia-smi
 - ✅ Idempotent installation markers
 - ✅ Windows line ending fixes (.gitattributes + Dockerfile handling)
 - ✅ Docker build context optimization (.dockerignore)
+- ✅ Tailscale integration for secure remote access
+- ✅ Persistent Cursor/VSCode server caching
+- ✅ RunPod-specific startup script
+- ✅ Custom utility scripts (ParaView manager, output manager)
 
-### In Testing
-- 🔄 Full orchestrated setup (make setup)
-- 🔄 Individual installer validation
-- 🔄 Volume persistence across restarts
-- 🔄 Development workflow validation
+### Production Features
+- 🚀 Single volume mount for RunPod network storage
+- 🚀 Tailscale VPN with persistent state
+- 🚀 SSH on ports 22 and 2222 (key-based auth only)
+- 🚀 Persistent IDE server installations
+- 🚀 Automatic environment detection (local vs RunPod)
 
 ### Next Steps
-1. Complete local testing of all 7 components
-2. Verify development environment (SSH, compilers, libraries)
-3. Push images to Docker Hub
-4. Deploy and test on RunPod
-5. Migrate to single /workspace volume with deps/ as subdirectory
+1. Push images to Docker Hub for faster RunPod deployment
+2. Add automated backup scripts for critical data
+3. Implement GPU auto-detection for architecture flags
 
 ## Development Environment Integration
 
-### Cursor IDE Setup
+### IDE Remote Development
+
+#### Cursor/VSCode Setup
 - **Connection**: SSH remote development to container
+- **SSH User**: root (key-based authentication only)
 - **Compiler**: nvc++ for GPU-aware IntelliSense
 - **Build integration**: CMake + Ninja build system
 - **Port forwarding**: 11111 for ParaView server connection
+- **Persistent servers**: IDE servers cached in volume for fast reconnection
+
+#### Connection Methods
+1. **Direct SSH**: `ssh root@<pod-ip> -p 2222`
+2. **Tailscale SSH**: `ssh root@<tailscale-ip>` (after Tailscale setup)
+3. **RunPod SSH**: `ssh root@<pod-id>.ssh.runpod.io`
 
 ### Performance Targets (Volume-Based)
 - **First setup**: 30-45 minutes (one-time volume initialization)
@@ -225,9 +260,48 @@ watch -n 1 nvidia-smi
 - Source this file to get consistent settings across all scripts
 - Key variables:
   - `DEPS_ROOT="/workspace/deps"` - Where all dependencies install
-  - `NVIDIA_HPC_VERSION="24.7"` - NVIDIA SDK version
+  - `NVIDIA_HPC_VERSION="25.7"` - NVIDIA HPC SDK version (supports Blackwell)
+  - `CUDA_VERSION="12.9"` - CUDA toolkit version
+  - `PARAVIEW_VERSION="6.0.0"` - ParaView server version
   - `BUILD_JOBS=$(nproc)` - Parallel build jobs
   - `CCACHE_SIZE="10G"` - Compiler cache size
+
+## RunPod Deployment
+
+### Environment Variables
+Set these in RunPod's environment configuration:
+```bash
+# Required for automatic Tailscale connection
+TAILSCALE_AUTHKEY=tskey-auth-...
+TAILSCALE_HOSTNAME=coral-machine
+
+# Automatically set by RunPod
+RUNPOD_POD_ID=<pod-id>
+RUNPOD_POD_IP=<pod-ip>
+```
+
+### Volume Configuration
+- **Type**: Network Volume (persistent)
+- **Mount Path**: `/workspace`
+- **Size**: 100GB minimum (15GB deps + workspace)
+- **Region**: Same as compute pod for best performance
+
+### Docker Image
+```bash
+# For RunPod deployment (future)
+gstvbrg/coral-runtime:latest
+```
+
+### Startup Modes
+The runtime container automatically detects the environment:
+- **Local Development**: Uses `startup.sh` (default)
+- **RunPod Deployment**: Uses `startup-runpod.sh` when `STARTUP_MODE=runpod`
+
+Features in RunPod mode:
+- Tailscale auto-configuration
+- SSH key persistence in volume
+- Cursor/VSCode server caching
+- Automatic ParaView aliases
 
 ### Known Issues & Solutions
 
@@ -253,10 +327,21 @@ watch -n 1 nvidia-smi
    - Libraries in flat `lib/` directory
    - Binaries in flat `bin/` directory
 
-6. **Storage Consistency (FIXED)**:
-   - **Problem**: Individual tests used bind mounts, orchestrated setup used named volumes
-   - **Solution**: docker-compose.yml configured for bind mounts consistently
-   - **Result**: All storage now uses `./volumes/deps/` and `./volumes/workspace/`
+6. **Single Volume Architecture (FIXED)**:
+   - **Problem**: Original design had two separate volumes (deps + workspace)
+   - **Root Cause**: Nested mount conflict - workspace mount would hide deps
+   - **Solution**: Single volume at `/workspace` with `deps/` as subdirectory
+   - **Result**: RunPod compatible, no mount conflicts, simpler architecture
+
+7. **Tailscale State Persistence**:
+   - State stored in `/workspace/deps/runtime/tailscale/`
+   - Survives container restarts
+   - Auto-cleanup of stalled daemons on startup
+
+8. **SSH Host Key Persistence**:
+   - Host keys stored in `/workspace/.ssh/`
+   - Prevents "host key changed" warnings
+   - Consistent fingerprint across restarts
 
 ## Critical Learnings: Palabos GPU Build Configuration
 

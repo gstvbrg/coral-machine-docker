@@ -47,6 +47,57 @@ else
 fi
 
 
+# Persist Cursor/VSCode servers and XDG dirs by symlinking into the volume
+PERSIST_ROOT="/workspace/deps/runtime"
+mkdir -p "$PERSIST_ROOT/cursor-server" \
+         "$PERSIST_ROOT/cursor-home" \
+         "$PERSIST_ROOT/vscode-server" \
+         "$PERSIST_ROOT/xdg/data" \
+         "$PERSIST_ROOT/xdg/config" \
+         "$PERSIST_ROOT/xdg/state" \
+         "$PERSIST_ROOT/xdg/cache" \
+         "$PERSIST_ROOT/npm-cache" \
+         "$PERSIST_ROOT/pip-cache" \
+         "$PERSIST_ROOT/yarn-cache"
+
+# Helper to replace a path with a symlink to persistent target
+persist_link() {
+    local src_path="$1"
+    local dst_path="$2"
+    if [ -L "$src_path" ]; then
+        return 0
+    fi
+    if [ -d "$src_path" ] || [ -f "$src_path" ]; then
+        rm -rf "$src_path"
+    fi
+    ln -s "$dst_path" "$src_path"
+}
+
+# Cursor server home and agent cache
+persist_link "/root/.cursor-server" "$PERSIST_ROOT/cursor-server"
+persist_link "/root/.cursor" "$PERSIST_ROOT/cursor-home"
+
+# VSCode remote server (Cursor uses similar paths)
+persist_link "/root/.vscode-server" "$PERSIST_ROOT/vscode-server"
+
+# Check if Cursor server is persisted
+if [ "$(ls -A "$PERSIST_ROOT/cursor-server")" ]; then
+    log_info "Cursor server is persisted from volume - fast startup enabled"
+else
+    log_info "Cursor server will be installed to persistent volume on first connect"
+fi
+
+# XDG base directories
+persist_link "/root/.local/share" "$PERSIST_ROOT/xdg/data"
+persist_link "/root/.config" "$PERSIST_ROOT/xdg/config"
+persist_link "/root/.local/state" "$PERSIST_ROOT/xdg/state"
+persist_link "/root/.cache" "$PERSIST_ROOT/xdg/cache"
+
+# Common language/tool caches
+persist_link "/root/.npm" "$PERSIST_ROOT/npm-cache"
+persist_link "/root/.cache/pip" "$PERSIST_ROOT/pip-cache"
+persist_link "/root/.yarn" "$PERSIST_ROOT/yarn-cache"
+
 # Setup persistent aliases
 if [ -f "/workspace/deps/scripts/setup-aliases.sh" ]; then
     if ! grep -q "setup-aliases.sh" ~/.bashrc 2>/dev/null; then

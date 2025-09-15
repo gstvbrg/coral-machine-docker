@@ -77,13 +77,35 @@ RUN mkdir -p /var/run/sshd \
 # Create mount points with organized output structure
 RUN mkdir -p /workspace/deps /workspace/source /workspace/build /workspace/.ccache \
     /workspace/output/vtk /workspace/output/data /workspace/output/images \
-    /workspace/output/checkpoints /workspace/output/logs
+    /workspace/output/checkpoints /workspace/output/logs \
+    /workspace/deps/runtime/cursor-server \
+    /workspace/deps/runtime/cursor-home \
+    /workspace/deps/runtime/vscode-server \
+    /workspace/deps/runtime/xdg/data \
+    /workspace/deps/runtime/xdg/config \
+    /workspace/deps/runtime/xdg/state \
+    /workspace/deps/runtime/xdg/cache \
+    /workspace/deps/runtime/npm-cache \
+    /workspace/deps/runtime/pip-cache \
+    /workspace/deps/runtime/yarn-cache
 
 # Environment defaults
 ENV CMAKE_PREFIX_PATH="/workspace/deps"
 ENV CCACHE_DIR="/workspace/.ccache"
 ENV NVIDIA_VISIBLE_DEVICES="all"
 ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
+# Persistent XDG base directories to leverage mounted volume for caches/config
+ENV XDG_DATA_HOME="/workspace/deps/runtime/xdg/data"
+ENV XDG_CONFIG_HOME="/workspace/deps/runtime/xdg/config"
+ENV XDG_STATE_HOME="/workspace/deps/runtime/xdg/state"
+ENV XDG_CACHE_HOME="/workspace/deps/runtime/xdg/cache"
+# VSCode/Cursor remote agent locations (speed up cold starts)
+ENV VSCODE_AGENT_FOLDER="/workspace/deps/runtime/vscode-server"
+ENV CURSOR_AGENT_FOLDER="/workspace/deps/runtime/cursor-server"
+# Common tool caches
+ENV NPM_CONFIG_CACHE="/workspace/deps/runtime/npm-cache"
+ENV PIP_CACHE_DIR="/workspace/deps/runtime/pip-cache"
+ENV YARN_CACHE_FOLDER="/workspace/deps/runtime/yarn-cache"
 # Set hostname for prompt
 ENV HOSTNAME="coral~machine"
 # Control which startup script to use (set to "runpod" for RunPod deployment)
@@ -106,16 +128,9 @@ RUN echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> /ro
     && echo '[ -f /etc/motd ] && cat /etc/motd' >> /root/.zshrc
 
 # Create MOTD (Message of the Day) for terminal sessions
-RUN cat > /etc/motd << 'EOF'
-Coral Machine Development Environment
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-Quick Commands:
-  coral-help  - Show all available commands
-  paraview    - Start ParaView server
-  check-env   - Verify environment setup
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-O RADIANT MUSES ~ MAKE ME YOUR INSTRUMENT
-EOF
+RUN echo '     coral-help  paraview  check-env    ' >> /etc/motd && \
+    echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' >> /etc/motd && \
+    echo 'O RADIANT MUSES ~ MAKE ME YOUR INSTRUMENT' >> /etc/motd
 
 # Setup root SSH directory for potential key-based access
 RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh \

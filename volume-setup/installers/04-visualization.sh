@@ -65,21 +65,90 @@ install_paraview() {
     log_info "Creating headless pvserver wrapper..."
     cat > "${DEPS_BIN}/pvserver-headless" << 'EOF'
 #!/bin/bash
-# ParaView server wrapper for headless operation
+# ParaView server wrapper with smart MPI defaults and GPU preference
+#
+# Usage:
+#   pvserver-headless                    # Auto-detect MPI procs based on cores
+#   PV_MPI_PROCS=1 pvserver-headless    # Force single process (no MPI)
+#   PV_MPI_PROCS=8 pvserver-headless    # Force 8 MPI processes
+#   PV_MPI_PROCS=max pvserver-headless  # Use all available cores
+#   PV_BACKEND=egl pvserver-headless    # Force EGL backend
+#   PV_BACKEND=xvfb pvserver-headless   # Force Xvfb backend
 
-if [ -z "$DISPLAY" ]; then
-    # No display - use software rendering
-    export PV_BACKEND=${PV_BACKEND:-xvfb}
-    if [ "$PV_BACKEND" = "xvfb" ]; then
-        # Use Xvfb for software rendering
-        xvfb-run -a -s "-screen 0 1024x768x24" "${DEPS_BIN}/pvserver" "$@"
+DEPS_BIN="$(dirname "$0")"
+
+# Smart MPI process count detection
+if [ -z "$PV_MPI_PROCS" ]; then
+    # Auto-detect optimal MPI process count
+    AVAILABLE_CORES=$(nproc)
+
+    if [ "$AVAILABLE_CORES" -ge 8 ]; then
+        # Plenty of cores - use half for ParaView (leave half for other work)
+        PV_MPI_PROCS=$((AVAILABLE_CORES / 2))
+    elif [ "$AVAILABLE_CORES" -ge 4 ]; then
+        # Moderate cores - use most but leave one for system
+        PV_MPI_PROCS=$((AVAILABLE_CORES - 1))
     else
-        # Try EGL/OSMesa offscreen rendering
-        "${DEPS_BIN}/pvserver" --force-offscreen-rendering "$@"
+        # Few cores - just use 1 (no MPI)
+        PV_MPI_PROCS=1
     fi
+
+    echo "[pvserver] Auto-detected $AVAILABLE_CORES cores, using $PV_MPI_PROCS MPI processes" >&2
+elif [ "$PV_MPI_PROCS" = "max" ]; then
+    # User wants maximum parallelism
+    PV_MPI_PROCS=$(nproc)
+    echo "[pvserver] Using maximum parallelism: $PV_MPI_PROCS MPI processes" >&2
+fi
+
+# Build the pvserver command with common flags
+PVSERVER_CMD="${DEPS_BIN}/pvserver --disable-xdisplay-test"
+
+# Apply MPI if more than 1 process requested
+if [ "$PV_MPI_PROCS" -gt 1 ] 2>/dev/null; then
+    # Check if mpirun is available
+    if command -v mpirun &> /dev/null; then
+        PVSERVER_CMD="mpirun -np $PV_MPI_PROCS $PVSERVER_CMD"
+        echo "[pvserver] Running with MPI: $PV_MPI_PROCS processes" >&2
+    else
+        echo "[pvserver] Warning: mpirun not found, falling back to single process" >&2
+        echo "[pvserver] Install MPI with: apt-get install libopenmpi-bin" >&2
+    fi
+elif [ "$PV_MPI_PROCS" = "1" ]; then
+    echo "[pvserver] Running single process (MPI disabled)" >&2
+fi
+
+# Auto-detect best rendering backend
+if [ -z "$DISPLAY" ]; then
+    # No display - determine best backend
+    if [ -z "$PV_BACKEND" ] || [ "$PV_BACKEND" = "auto" ]; then
+        # Check for GPU and EGL support
+        if [ -e "/dev/nvidia0" ] || [ -n "$NVIDIA_VISIBLE_DEVICES" ]; then
+            if ldd "${DEPS_BIN}/pvserver" 2>/dev/null | grep -q libEGL; then
+                PV_BACKEND="egl"
+            else
+                PV_BACKEND="xvfb"
+            fi
+        else
+            PV_BACKEND="xvfb"
+        fi
+    fi
+
+    case "$PV_BACKEND" in
+        egl)
+            # Prefer EGL for GPU rendering - no Xvfb needed!
+            echo "[pvserver] Using EGL GPU rendering (hardware accelerated)" >&2
+            exec $PVSERVER_CMD --force-offscreen-rendering "$@"
+            ;;
+        xvfb|*)
+            # Fall back to Xvfb software rendering with better resolution
+            echo "[pvserver] Using Xvfb software rendering" >&2
+            exec xvfb-run -a -s "-screen 0 1920x1080x24" $PVSERVER_CMD "$@"
+            ;;
+    esac
 else
     # Display available - use it
-    "${DEPS_BIN}/pvserver" "$@"
+    echo "[pvserver] Using display $DISPLAY" >&2
+    exec $PVSERVER_CMD "$@"
 fi
 EOF
     chmod +x "${DEPS_BIN}/pvserver-headless"
@@ -194,3 +263,39 @@ log_info "  - ParaView server: ${DEPS_BIN}/pvserver"
 log_info "  - ParaView wrapper: ${DEPS_BIN}/pvserver-headless"
 log_info "  - Polyscope headers: ${DEPS_INCLUDE}/polyscope/"
 log_info "  - ImGui headers: ${DEPS_INCLUDE}/imgui/"
+
+# Performance recommendations
+cat << 'EOF'
+
+=================================================================
+ParaView Performance Optimization Tips:
+=================================================================
+
+SERVER SIDE (already configured):
+  ✓ Smart MPI auto-detection (uses half of available cores)
+  ✓ EGL GPU rendering when available
+  ✓ Optimized resolution (1920x1080)
+  ✓ Display test skipping for faster startup
+
+CLIENT SIDE (configure in ParaView GUI):
+  1. Enable Image Compression:
+     Edit > Settings > Render View > Image Compression
+     - Select "LZ4" for fast compression
+     - Or "NVPipe" if you have NVIDIA GPU
+
+  2. Enable Interactive Subsampling:
+     Edit > Settings > Render View > Interactive Rendering
+     - Set "Image Reduction Factor" to 2 or 4
+     - Reduces resolution during rotation/zoom
+
+  3. For Large Data (>1GB):
+     - Apply D3 filter immediately after loading
+     - This distributes data across MPI processes
+
+USAGE EXAMPLES:
+  pvserver-headless                    # Auto-detect cores
+  PV_MPI_PROCS=1 pvserver-headless    # Debug mode (no MPI)
+  PV_MPI_PROCS=max pvserver-headless  # Maximum performance
+  PV_BACKEND=egl pvserver-headless    # Force GPU rendering
+=================================================================
+EOF
