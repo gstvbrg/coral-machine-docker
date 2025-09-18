@@ -79,6 +79,18 @@ export PATH="${DEPS_BIN}:$PATH"
 export LD_LIBRARY_PATH="${DEPS_LIB}:$LD_LIBRARY_PATH"
 export LIBRARY_PATH="${DEPS_LIB}:$LIBRARY_PATH"
 
+# GPU Architecture Detection (populated at runtime by startup scripts)
+# These variables will be auto-detected when the container starts:
+#   CUDA_COMPUTE_CAPABILITY - Numeric compute capability (e.g., "89" for RTX 4090)
+#   CUDA_ARCH_FLAG         - Architecture flag for compilers (e.g., "cc89")
+#   CUDA_ARCH_SM           - SM format for NVCC (e.g., "sm_89")
+#   NVHPC_GPU_FLAG         - GPU flag for nvc++ (e.g., "-gpu=cc89")
+#   CMAKE_CUDA_ARCHITECTURES - CMake CUDA architectures (e.g., "89")
+#   GPU_ARCH_NAME          - Human-readable architecture name (e.g., "Ada Lovelace")
+#   GPU_NAME               - Detected GPU name (e.g., "NVIDIA GeForce RTX 4090")
+#
+# To override auto-detection, set CUDA_ARCH_OVERRIDE environment variable:
+#   export CUDA_ARCH_OVERRIDE=89  # Force RTX 4090 architecture
 EOF
 
 chmod +x "${DEPS_ROOT}/env.sh"
@@ -107,3 +119,5 @@ log_info "  ${DEPS_INCLUDE}/ - Headers"
 log_info "  ${DEPS_ROOT}/scripts/ - Management scripts"
 log_info "  ${DEPS_ROOT}/runtime/ - Runtime files"
 log_info "  ${CCACHE_DIR}/ - Build cache"
+
+

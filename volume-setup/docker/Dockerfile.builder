@@ -40,9 +40,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libtbb-dev \
     # Runtime for testing
     xvfb \
+    # SSH for host key generation during setup
+    openssh-server \
     # Utilities
     sudo \
     rsync \
+    pv \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
@@ -51,7 +54,7 @@ RUN groupadd -g 1000 builder \
     && useradd -m -u 1000 -g 1000 -s /bin/bash builder \
     && echo "builder ALL=(ALL) NOPASSWD:ALL" > /etc/sudoers.d/builder
 
-# Copy setup scripts into image
+# Copy setup assets (includes authorized_keys) into image
 # This makes the image self-contained for RunPod deployment
 COPY . /opt/volume-setup/
 
@@ -61,6 +64,7 @@ RUN find /opt/volume-setup -type f \( -name "*.sh" -o -name "*.env" -o -name "co
     -exec sed -i 's/\r$//' {} \; \
     && chmod +x /opt/volume-setup/*.sh \
     && chmod +x /opt/volume-setup/installers/*.sh \
+    && if [ -f /opt/volume-setup/authorized_keys ]; then chmod 600 /opt/volume-setup/authorized_keys; fi \
     && chown -R builder:builder /opt/volume-setup
 
 # Create workspace mount points with organized output structure

@@ -40,9 +40,18 @@ install_paraview() {
     PV_ARCHIVE="paraview-${PARAVIEW_VERSION}.tar.gz"
     download_file "${PARAVIEW_URL}" "${PV_ARCHIVE}" "ParaView ${PARAVIEW_VERSION}"
     
-    # Extract
+    # Extract (with progress if pv is available)
     log_info "Extracting ParaView..."
-    tar -xzf "${PV_ARCHIVE}"
+    if command -v pv &> /dev/null; then
+        PV_SIZE=$(stat -c%s "${PV_ARCHIVE}" 2>/dev/null || echo "")
+        if [ -n "$PV_SIZE" ]; then
+            pv -s "$PV_SIZE" "${PV_ARCHIVE}" | tar -xz -f -
+        else
+            pv "${PV_ARCHIVE}" | tar -xz -f -
+        fi
+    else
+        tar -xzf "${PV_ARCHIVE}"
+    fi
     rm -f "${PV_ARCHIVE}"
     
     # Find extracted directory

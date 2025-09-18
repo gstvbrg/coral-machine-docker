@@ -32,9 +32,18 @@ cd /tmp
 NVHPC_ARCHIVE="nvhpc_${NVIDIA_HPC_VERSION}.tar.gz"
 download_file "${NVIDIA_SDK_URL}" "${NVHPC_ARCHIVE}" "NVIDIA HPC SDK"
 
-# Extract
+# Extract (with progress if pv is available)
 log_info "Extracting NVIDIA HPC SDK (this takes a few minutes)..."
-tar -xzf "${NVHPC_ARCHIVE}"
+if command -v pv &> /dev/null; then
+    SIZE_BYTES=$(stat -c%s "${NVHPC_ARCHIVE}" 2>/dev/null || echo "")
+    if [ -n "$SIZE_BYTES" ]; then
+        pv -s "$SIZE_BYTES" "${NVHPC_ARCHIVE}" | tar -xz -f -
+    else
+        pv "${NVHPC_ARCHIVE}" | tar -xz -f -
+    fi
+else
+    tar -xzf "${NVHPC_ARCHIVE}"
+fi
 rm -f "${NVHPC_ARCHIVE}"
 
 # Find extracted directory

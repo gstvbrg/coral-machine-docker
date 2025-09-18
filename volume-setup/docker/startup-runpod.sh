@@ -32,15 +32,33 @@ else
     log_warn "Action: Run setup first or check volume mount"
 fi
 
-# Load environment
+# Detect GPU architecture first
+if [ -f "/workspace/deps/scripts/detect-gpu-arch.sh" ]; then
+    log_info "Detecting GPU architecture..."
+    source /workspace/deps/scripts/detect-gpu-arch.sh
+    if detect_gpu_architecture; then
+        # Write GPU vars to env.sh if detection succeeded
+        write_gpu_env "/workspace/deps/env.sh"
+        log_info "GPU: ${GPU_NAME} detected (${GPU_ARCH_FLAG})"
+    else
+        log_warn "GPU detection failed - will use multi-architecture builds"
+    fi
+fi
+
+# Load environment (includes GPU vars if detected)
 if [ -f "/workspace/deps/env.sh" ]; then
     source /workspace/deps/env.sh
     log_env "Environment loaded from /workspace/deps/env.sh"
-    
+
     # Quick validation
     which nvc++ &>/dev/null && log_check "nvc++ compiler" || log_miss "nvc++ compiler - run 'make install-compilers'"
     [ -f "/workspace/deps/lib/libpalabos.a" ] && log_check "Palabos library" || log_miss "Palabos library - run 'make install-libraries'"
     which pvserver &>/dev/null && log_check "ParaView server" || log_miss "ParaView - run 'make install-viz'"
+
+    # Show GPU architecture if detected
+    if [ -n "${GPU_ARCH_NAME:-}" ]; then
+        log_check "GPU arch: ${GPU_ARCH_NAME} (${GPU_ARCH_FLAG})"
+    fi
 else
     log_error "Environment not initialized at /workspace/deps/env.sh"
     log_error "Action: Run 'make setup' from volume-setup directory"
@@ -64,13 +82,16 @@ mkdir -p "$PERSIST_ROOT/cursor-server" \
 persist_link() {
     local src_path="$1"
     local dst_path="$2"
+    local parent_dir
+    parent_dir="$(dirname "$src_path")"
+    mkdir -p "$parent_dir" 2>/dev/null || true
     if [ -L "$src_path" ]; then
         return 0
     fi
     if [ -d "$src_path" ] || [ -f "$src_path" ]; then
         rm -rf "$src_path"
     fi
-    ln -s "$dst_path" "$src_path"
+    ln -s "$dst_path" "$src_path" || log_warn "Failed to link $src_path -> $dst_path"
 }
 
 # Cursor server home and agent cache
@@ -87,7 +108,18 @@ else
     log_info "Cursor server will be installed to persistent volume on first connect"
 fi
 
+# Proactively clean up any stale Cursor processes/tokens from previous sessions
+# This avoids reusing unhealthy multiplex/code servers that can delay reconnection
+if pgrep -f 'cursor-remote|cursor-server' >/dev/null 2>&1; then
+    log_info "Stopping stale Cursor processes (cursor-remote/cursor-server)"
+    pkill -f 'cursor-remote|cursor-server' >/dev/null 2>&1 || true
+fi
+rm -f /tmp/cursor-remote-*.token.* /tmp/cursor-remote-*.log.* >/dev/null 2>&1 || true
+
 # XDG base directories
+# Ensure parent directories exist for XDG symlinks
+mkdir -p /root/.local
+
 persist_link "/root/.local/share" "$PERSIST_ROOT/xdg/data"
 persist_link "/root/.config" "$PERSIST_ROOT/xdg/config"
 persist_link "/root/.local/state" "$PERSIST_ROOT/xdg/state"
@@ -109,37 +141,51 @@ if [ -f "/workspace/deps/scripts/setup-aliases.sh" ]; then
     source /workspace/deps/scripts/setup-aliases.sh
 fi
 
+# Use custom MOTD from volume if it exists
+if [ -f "/workspace/deps/runtime/motd" ]; then
+    cp /workspace/deps/runtime/motd /etc/motd
+    log_info "Custom MOTD loaded from volume"
+fi
+
 # SSH Server Setup
 if ! pgrep -x sshd > /dev/null; then
     log_ssh "Starting SSH server..."
-    
+
     # Create persistent SSH directory and runtime key location
     mkdir -p /workspace/.ssh /etc/ssh
     chmod 700 /workspace/.ssh 2>/dev/null || true
 
-    # Use runtime host key under /etc/ssh with strict perms; persist a backup under /workspace
+    # Link persistent SSH host keys from volume if they exist
     if [ -f /workspace/.ssh/ssh_host_ed25519_key ]; then
-        cp -f /workspace/.ssh/ssh_host_ed25519_key /etc/ssh/ssh_host_ed25519_key
-        [ -f /workspace/.ssh/ssh_host_ed25519_key.pub ] && cp -f /workspace/.ssh/ssh_host_ed25519_key.pub /etc/ssh/ssh_host_ed25519_key.pub || true
-        log_ssh "Using existing host key from /workspace/.ssh/"
+        # Use symlinks to persistent keys (created during volume setup)
+        for key_type in rsa ed25519 ecdsa; do
+            if [ -f "/workspace/.ssh/ssh_host_${key_type}_key" ]; then
+                ln -sf "/workspace/.ssh/ssh_host_${key_type}_key" "/etc/ssh/ssh_host_${key_type}_key"
+                ln -sf "/workspace/.ssh/ssh_host_${key_type}_key.pub" "/etc/ssh/ssh_host_${key_type}_key.pub"
+                chmod 600 "/etc/ssh/ssh_host_${key_type}_key" 2>/dev/null || true
+                chmod 644 "/etc/ssh/ssh_host_${key_type}_key.pub" 2>/dev/null || true
+            fi
+        done
+        log_ssh "Using persistent host keys from /workspace/.ssh/"
     else
-        umask 077 && ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" >/dev/null 2>&1
-        cp -f /etc/ssh/ssh_host_ed25519_key /workspace/.ssh/ssh_host_ed25519_key || true
-        cp -f /etc/ssh/ssh_host_ed25519_key.pub /workspace/.ssh/ssh_host_ed25519_key.pub || true
-        log_ssh "Generated new host key → /workspace/.ssh/ssh_host_ed25519_key"
+        # Generate temporary keys if volume setup hasn't run yet
+        log_warn "No persistent SSH host keys found - generating temporary keys"
+        ssh-keygen -t ed25519 -f /etc/ssh/ssh_host_ed25519_key -N "" >/dev/null 2>&1
+        ssh-keygen -t rsa -f /etc/ssh/ssh_host_rsa_key -N "" >/dev/null 2>&1
+        ssh-keygen -t ecdsa -f /etc/ssh/ssh_host_ecdsa_key -N "" >/dev/null 2>&1
+        log_warn "Run volume setup to create persistent host keys"
     fi
-    chmod 600 /etc/ssh/ssh_host_ed25519_key || true
-    [ -f /etc/ssh/ssh_host_ed25519_key.pub ] && chmod 644 /etc/ssh/ssh_host_ed25519_key.pub || true
-    # Best-effort perms on volume (may be ignored by some backends)
-    [ -f /workspace/.ssh/ssh_host_ed25519_key ] && chmod 600 /workspace/.ssh/ssh_host_ed25519_key || true
-    [ -f /workspace/.ssh/ssh_host_ed25519_key.pub ] && chmod 644 /workspace/.ssh/ssh_host_ed25519_key.pub || true
-    [ -f /workspace/.ssh/authorized_keys ] && chmod 600 /workspace/.ssh/authorized_keys || true
+
+    # Set permissions on authorized_keys if it exists
+    [ -f /workspace/.ssh/authorized_keys ] && chmod 600 /workspace/.ssh/authorized_keys 2>/dev/null || true
     
     # Create minimal sshd_config
     cat > /tmp/sshd_config << 'EOF'
 Port 22
 Port 2222
 HostKey /etc/ssh/ssh_host_ed25519_key
+HostKey /etc/ssh/ssh_host_rsa_key
+HostKey /etc/ssh/ssh_host_ecdsa_key
 PermitRootLogin yes
 PubkeyAuthentication yes
 AuthorizedKeysFile /workspace/.ssh/authorized_keys
@@ -148,32 +194,50 @@ ChallengeResponseAuthentication no
 StrictModes no
 ClientAliveInterval 60
 ClientAliveCountMax 3
+UseDNS no
+Subsystem sftp /usr/lib/openssh/sftp-server
+MaxStartups 10:30:100
+TCPKeepAlive yes
 EOF
     
-    # Check if authorized_keys exists, create if needed
-    if [ ! -f /workspace/.ssh/authorized_keys ]; then
-        # Copy from image if available (baked in during build)
-        if [ -f /root/.ssh/authorized_keys ]; then
-            cp /root/.ssh/authorized_keys /workspace/.ssh/authorized_keys
-            chmod 600 /workspace/.ssh/authorized_keys
-            KEY_COUNT=$(grep -c '^ssh-' /workspace/.ssh/authorized_keys 2>/dev/null || echo 0)
-            log_ssh "Copied $KEY_COUNT authorized keys from image to volume"
-        else
-            touch /workspace/.ssh/authorized_keys
-            chmod 600 /workspace/.ssh/authorized_keys
-            log_warn "No SSH keys configured"
-            log_warn "Action: echo 'ssh-ed25519 YOUR_KEY' >> /workspace/.ssh/authorized_keys"
-        fi
-    else
+    # Check if authorized_keys exists from volume setup
+    if [ -f /workspace/.ssh/authorized_keys ]; then
         KEY_COUNT=$(grep -c '^ssh-' /workspace/.ssh/authorized_keys 2>/dev/null || echo 0)
         log_ssh "Authorized keys: $KEY_COUNT found in /workspace/.ssh/authorized_keys"
+    else
+        touch /workspace/.ssh/authorized_keys
+        chmod 600 /workspace/.ssh/authorized_keys
+        log_warn "No SSH keys configured"
+        log_warn "Action: echo 'ssh-ed25519 YOUR_KEY' >> /workspace/.ssh/authorized_keys"
     fi
     
-    # Start SSH server
-    if /usr/sbin/sshd -f /tmp/sshd_config 2>/tmp/sshd_error.log; then
-        log_ssh "Listening on ports 22 and 2222 (key auth only)"
+    # Preflight and start; fallback to copying keys if needed
+    PRE_ERR="$([ -x /usr/sbin/sshd ] && /usr/sbin/sshd -t -f /tmp/sshd_config 2>&1 || true)"
+    if [ -z "$PRE_ERR" ]; then
+        log_ssh "Using symlinked host keys"
+        if /usr/sbin/sshd -f /tmp/sshd_config 2>/tmp/sshd_error.log; then
+            log_ssh "Listening on ports 22 and 2222 (key auth only)"
+        else
+            log_error "SSH failed to start. Check: tail -20 /tmp/sshd_error.log"
+        fi
     else
-        log_error "SSH failed to start. Check: tail -20 /tmp/sshd_error.log"
+        if echo "$PRE_ERR" | grep -qi 'permission'; then
+            log_warn "SSHD preflight failed due to permission issues; copying host keys into /etc/ssh"
+        else
+            log_warn "SSHD preflight failed; copying host keys (reason: $(echo "$PRE_ERR" | head -n1))"
+        fi
+        for key_type in rsa ed25519 ecdsa; do
+            if [ -f "/workspace/.ssh/ssh_host_${key_type}_key" ] && [ -f "/workspace/.ssh/ssh_host_${key_type}_key.pub" ]; then
+                install -m 600 -p "/workspace/.ssh/ssh_host_${key_type}_key"     "/etc/ssh/ssh_host_${key_type}_key"
+                install -m 644 -p "/workspace/.ssh/ssh_host_${key_type}_key.pub" "/etc/ssh/ssh_host_${key_type}_key.pub"
+            fi
+        done
+
+        if /usr/sbin/sshd -t -f /tmp/sshd_config 2>/tmp/sshd_error.log && /usr/sbin/sshd -f /tmp/sshd_config 2>/tmp/sshd_error.log; then
+            log_ssh "Listening on ports 22 and 2222 (copied host keys)"
+        else
+            log_error "SSH failed to start. Check: tail -20 /tmp/sshd_error.log"
+        fi
     fi
 else
     log_ssh "Already running (ports 22 and 2222)"
@@ -241,12 +305,16 @@ if command -v tailscaled >/dev/null 2>&1; then
         log_info "Cleanup complete. State reset for clean restart (authkey preserved)"
         # Continue without Tailscale instead of hanging
     else
-        # Check actual backend state instead of file existence
-        BACKEND_STATE=""
-        if timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"NeedsLogin"'; then
-            BACKEND_STATE="NeedsLogin"
-        elif timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
-            BACKEND_STATE="Running"
+        # Check actual backend state robustly (jq preferred, grep fallback)
+        if command -v jq >/dev/null 2>&1; then
+            BACKEND_STATE="$(timeout 5 tailscale status --json 2>/dev/null | jq -r '.BackendState // "unknown"')"
+        else
+            BACKEND_STATE="unknown"
+            if timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"NeedsLogin"'; then
+                BACKEND_STATE="NeedsLogin"
+            elif timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
+                BACKEND_STATE="Running"
+            fi
         fi
 
         if [ "$BACKEND_STATE" = "NeedsLogin" ]; then

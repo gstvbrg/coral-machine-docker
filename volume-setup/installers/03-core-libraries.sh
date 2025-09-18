@@ -14,6 +14,13 @@ log_section "Core Libraries Installation"
 # ============================================================================
 # Palabos-hybrid (CFD Library)
 # ============================================================================
+# GPU Acceleration Strategy:
+# - Uses C++ standard parallelism (stdpar) instead of traditional CUDA kernels
+# - PALABOS_ENABLE_CUDA=OFF: Not using CUDA kernels, using stdpar instead
+# - -DUSE_CUDA_MALLOC: Still needed for GPU memory management with stdpar
+# - -stdpar=gpu: Enables GPU parallelization via C++ parallel algorithms
+# - All flags are defined in config.env for ABI consistency with downstream builds
+# ============================================================================
 install_palabos() {
     log_info "Installing Palabos-hybrid CFD library..."
     
@@ -35,10 +42,8 @@ install_palabos() {
     # Disable examples to speed up build
     log_info "Configuring Palabos build..."
     sed -i -E 's|^[[:space:]]*add_subdirectory[[:space:]]*\([[:space:]]*examples/|# DISABLED: &|g' CMakeLists.txt
-    
+
     # Configure with CMake
-    # Use system g++ + system MPI for reliable Palabos build
-    # NVIDIA compilers will be used later for actual CFD development
     mkdir -p build
     cd build
     
@@ -55,16 +60,18 @@ install_palabos() {
     
     log_info "Using nvc++ from: $(which nvc++)"
     log_info "Building WITHOUT MPI to avoid C++ bindings issues (GPU parallelism via -stdpar)"
-    
+    log_info "GPU Compiler Flags: ${NVHPC_CXX_FLAGS}"
+
     # Configure with nvc++ WITHOUT MPI to avoid C++ bindings issues
     # For MPI support, users should follow GPU examples pattern (rebuild from source)
+    # Using stdpar for GPU acceleration instead of traditional CUDA kernels
     cmake .. \
         -G Ninja \
         -DCMAKE_BUILD_TYPE="${CMAKE_BUILD_TYPE}" \
         -DCMAKE_CXX_COMPILER=nvc++ \
         -DCMAKE_C_COMPILER=nvc \
         -DCMAKE_CXX_STANDARD="${CMAKE_CXX_STANDARD}" \
-        -DCMAKE_CXX_FLAGS="-O3 -stdpar=gpu -gpu=cc80,cc86,cc89,cc90,cc100 -std=c++20 -Msingle -Mfcon -fopenmp -DUSE_CUDA_MALLOC" \
+        -DCMAKE_CXX_FLAGS="${NVHPC_CXX_FLAGS}" \
         -DENABLE_MPI=OFF \
         -DPALABOS_ENABLE_MPI=OFF \
         -DPALABOS_ENABLE_CUDA=OFF \
@@ -204,6 +211,10 @@ cat >> "${DEPS_ROOT}/env.sh" << 'EOF'
 # Core libraries
 export PALABOS_INCLUDE="${DEPS_INCLUDE}/palabos"
 export GEOMETRY_CENTRAL_INCLUDE="${DEPS_INCLUDE}/geometrycentral"
+
+# GPU compiler flags for downstream ABI compatibility
+# Use these exact flags when building applications that link with Palabos
+export NVHPC_CXX_FLAGS_FOR_CMAKE="${NVHPC_CXX_FLAGS}"
 EOF
 
 log_success "Core libraries installation complete"

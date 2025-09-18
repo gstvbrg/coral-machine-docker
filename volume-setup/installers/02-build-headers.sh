@@ -52,16 +52,10 @@ done
 copy_headers "/usr/include/tbb" "TBB"
 copy_headers "/usr/include/oneapi" "oneAPI TBB"
 
-# HDF5 headers removed - only needed for Palabos examples we don't compile
-# Saves space and reduces complexity
-
 # Copy essential shared libraries that might be needed at runtime
 log_info "Copying essential runtime libraries..."
 # TBB might be needed by ParaView for parallel rendering
 copy_libraries "libtbb.so*" "TBB libraries"
-# HDF5 removed - not needed without Palabos examples
-
-# pkg-config directory removed - not used in our build system
 
 # Update environment file with include paths
 log_info "Updating environment configuration..."
