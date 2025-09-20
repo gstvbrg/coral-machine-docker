@@ -1,0 +1,184 @@
+# Runtime image for Coral Machine Development
+# Minimal image that uses pre-built dependencies from volume
+# CUDA is provided by the mounted NVIDIA HPC SDK - no CUDA base image needed!
+
+FROM ubuntu:24.04
+
+# Running as root for RunPod deployment simplicity
+
+ENV DEBIAN_FRONTEND=noninteractive
+SHELL ["/bin/bash", "-lc"]
+
+# Runtime dependencies and essential build tools
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    # Core system
+    openssh-server \
+    openssh-client \
+    ca-certificates \
+    # Essential tools for downloading/extracting
+    curl \
+    wget \
+    unzip \
+    tar \
+    xz-utils \
+    # Essential build tools (Ubuntu 24.04 has newer versions)
+    binutils \
+    build-essential \
+    cmake \
+    ninja-build \
+    ccache \
+    # Git for source management
+    git \
+    git-lfs \
+    # Debugging tools for C++ development
+    gdb \
+    valgrind \
+    # Python (24.04 has Python 3.12 by default)
+    python3 \
+    python3-pip \
+    python3-venv \
+    # Minimal dev tools
+    vim-tiny \
+    nano \
+    htop \
+    tree \
+    # Shell
+    zsh \
+    tmux \
+    # File operations
+    rsync \
+    # Graphics runtime libs (for ParaView/visualization)
+    libegl1 \
+    libgl1 \
+    libopengl0 \
+    libglfw3 \
+    libx11-6 \
+    libxrender1 \
+    libxcursor1 \
+    xvfb \
+    # Process management
+    tini \
+    # Networking tools
+    netcat-openbsd \
+    iputils-ping \
+    net-tools \
+    # Networking utilities
+    iproute2 \
+    dnsutils \
+    jq \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Node.js 22 LTS (latest) from NodeSource
+# Ubuntu 24.04 still ships with Node 18, so we get the latest
+RUN curl -fsSL https://deb.nodesource.com/setup_22.x | bash - && \
+    apt-get install -y nodejs && \
+    apt-get clean && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Tailscale (concise official installer)
+RUN curl -fsSL https://tailscale.com/install.sh | sh \
+    && apt-get clean \
+    && rm -rf /var/lib/apt/lists/*
+
+# Configure SSH daemon
+RUN mkdir -p /var/run/sshd \
+    && sed -i 's/^#\?PasswordAuthentication .*/PasswordAuthentication no/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PermitRootLogin .*/PermitRootLogin yes/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?PubkeyAuthentication .*/PubkeyAuthentication yes/' /etc/ssh/sshd_config \
+    && sed -i 's/^#\?ChallengeResponseAuthentication .*/ChallengeResponseAuthentication no/' /etc/ssh/sshd_config \
+    && echo "PermitUserEnvironment yes" >> /etc/ssh/sshd_config
+
+# Create mount points with organized output structure
+RUN mkdir -p /workspace/deps /workspace/source /workspace/build /workspace/.ccache \
+    /workspace/output/vtk /workspace/output/data /workspace/output/images \
+    /workspace/output/checkpoints /workspace/output/logs
+
+# Environment defaults
+ENV CMAKE_PREFIX_PATH="/workspace/deps"
+ENV CCACHE_DIR="/workspace/.ccache"
+ENV NVIDIA_VISIBLE_DEVICES="all"
+ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
+# These environment variables point to directories created by the volume setup
+# The actual directories are created during volume initialization, not here
+ENV XDG_DATA_HOME="/workspace/deps/runtime/xdg/data"
+ENV XDG_CONFIG_HOME="/workspace/deps/runtime/xdg/config"
+ENV XDG_STATE_HOME="/workspace/deps/runtime/xdg/state"
+ENV XDG_CACHE_HOME="/workspace/deps/runtime/xdg/cache"
+ENV VSCODE_AGENT_FOLDER="/workspace/deps/runtime/vscode-server"
+ENV CURSOR_AGENT_FOLDER="/workspace/deps/runtime/cursor-server"
+ENV NPM_CONFIG_CACHE="/workspace/deps/runtime/npm-cache"
+ENV PIP_CACHE_DIR="/workspace/deps/runtime/pip-cache"
+ENV YARN_CACHE_FOLDER="/workspace/deps/runtime/yarn-cache"
+# Set hostname for prompt
+ENV HOSTNAME="coral~machine"
+# Control which startup script to use (set to "runpod" for RunPod deployment)
+ENV STARTUP_MODE="default"
+ # Ensure Tini reaps zombies even if not PID 1 (RunPod may wrap entrypoint)
+ENV TINI_SUBREAPER=1
+
+# Configure package managers to use volume-based directories
+# npm will install global packages to /workspace/deps/runtime/npm-global
+ENV NPM_CONFIG_PREFIX="/workspace/deps/runtime/npm-global"
+# pip will install user packages to /workspace/deps/runtime/pip-user
+ENV PYTHONUSERBASE="/workspace/deps/runtime/pip-user"
+# Add volume-based package bins to PATH
+ENV PATH="/workspace/deps/runtime/npm-global/bin:/workspace/deps/runtime/pip-user/bin:${PATH}"
+
+# Configure root shell environment (since we'll run as root in RunPod)
+RUN echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> /root/.bashrc \
+    && echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> /root/.zshrc \
+    && echo 'export PS1="\[\033[01;31m\]\u@coral~machine\[\033[00m\]:\[\033[01;34m\]\w\[\033[00m\]\$ "' >> /root/.bashrc \
+    && echo 'export PS1="%F{red}%n@coral~machine%f:%F{blue}%~%f %# "' >> /root/.zshrc \
+    && echo 'export HOSTNAME="coral~machine"' >> /root/.bashrc \
+    && echo 'export HOSTNAME="coral~machine"' >> /root/.zshrc \
+    && echo 'alias ll="ls -la"' >> /root/.bashrc \
+    && echo 'alias ll="ls -la"' >> /root/.zshrc \
+    && echo 'alias gs="git status"' >> /root/.bashrc \
+    && echo 'alias gs="git status"' >> /root/.zshrc \
+    && echo '[ -f /etc/motd ] && cat /etc/motd' >> /root/.bashrc \
+    && echo '[ -f /etc/motd ] && cat /etc/motd' >> /root/.zshrc \
+    && chsh -s /usr/bin/zsh root
+
+# Create MOTD (Message of the Day) for terminal sessions
+RUN echo 'O RADIANT MUSES ~ MAKE ME YOUR INSTRUMENT' >> /etc/motd && \
+    echo '━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━' >> /etc/motd && \
+    echo '     coral-help  paraview  check-env     ' >> /etc/motd
+    
+# Setup root SSH directory (authorized_keys will be linked from volume at runtime)
+RUN mkdir -p /root/.ssh && chmod 700 /root/.ssh
+
+# Copy startup scripts (both regular and RunPod version)
+COPY docker/startup.sh /usr/local/bin/startup.sh
+COPY docker/startup-runpod.sh /usr/local/bin/startup-runpod.sh
+# Fix line endings (in case of Windows development) and make executable
+RUN sed -i 's/\r$//' /usr/local/bin/startup.sh /usr/local/bin/startup-runpod.sh \
+    && chmod +x /usr/local/bin/startup.sh /usr/local/bin/startup-runpod.sh
+
+# Note: authorized_keys are now handled by volume setup and linked at runtime
+# This ensures persistence across container restarts
+
+WORKDIR /workspace
+
+# Ports
+EXPOSE 22 11111
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=15s \
+    CMD nc -z localhost 22 || exit 1
+
+# Create startup dispatcher script that selects the right startup based on STARTUP_MODE
+RUN printf '#!/bin/bash\n\
+if [ "$STARTUP_MODE" = "runpod" ]; then\n\
+    exec /usr/local/bin/startup-runpod.sh\n\
+else\n\
+    exec /usr/local/bin/startup.sh\n\
+fi\n' > /usr/local/bin/startup-dispatcher.sh && \
+    chmod +x /usr/local/bin/startup-dispatcher.sh
+
+# Stay as root for RunPod deployment (aligns with SSH access)
+USER root
+
+# Use tini for proper signal handling (subreaper to handle non-PID1 cases)
+ENTRYPOINT ["/usr/bin/tini", "-s", "--"]
+CMD ["/usr/local/bin/startup-dispatcher.sh"]

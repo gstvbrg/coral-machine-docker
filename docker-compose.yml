@@ -1,0 +1,122 @@
+
+services:
+  # Service for initial volume setup
+  setup:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+    profiles: ["setup"]
+    volumes:
+      - coral-workspace:/workspace
+    environment:
+      # Pass all configuration from .env (single source of truth)
+      - BUILD_JOBS=${BUILD_JOBS:-8}
+      - CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}
+      - CCACHE_SIZE=${CCACHE_SIZE:-10G}
+      - NVIDIA_HPC_VERSION=${NVIDIA_HPC_VERSION:-25.7}
+      - PARAVIEW_VERSION=${PARAVIEW_VERSION:-6.0.0}
+      - CUDA_VERSION=${CUDA_VERSION:-12.9}
+      - INSTALL_NVIDIA_HPC=${INSTALL_NVIDIA_HPC:-true}
+      - INSTALL_PARAVIEW=${INSTALL_PARAVIEW:-true}
+      - INSTALL_PALABOS=${INSTALL_PALABOS:-true}
+      - INSTALL_GEOMETRY_CENTRAL=${INSTALL_GEOMETRY_CENTRAL:-true}
+      - INSTALL_POLYSCOPE=${INSTALL_POLYSCOPE:-true}
+      - INSTALL_EIGEN3=${INSTALL_EIGEN3:-true}
+      - INSTALL_GL_HEADERS=${INSTALL_GL_HEADERS:-true}
+    # Run as root for installation
+    user: root
+    stdin_open: true
+    tty: true
+
+  # Service for running individual installers
+  installer:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+    profiles: ["installer"]
+    volumes:
+      - coral-workspace:/workspace
+      - ../ref:/opt/volume-setup/ref
+    environment:
+      # Pass all configuration from .env (single source of truth)
+      - BUILD_JOBS=${BUILD_JOBS:-8}
+      - CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE:-Release}
+      - CCACHE_SIZE=${CCACHE_SIZE:-10G}
+      - NVIDIA_HPC_VERSION=${NVIDIA_HPC_VERSION:-25.7}
+      - PARAVIEW_VERSION=${PARAVIEW_VERSION:-6.0.0}
+      - CUDA_VERSION=${CUDA_VERSION:-12.9}
+      - INSTALL_NVIDIA_HPC=${INSTALL_NVIDIA_HPC:-true}
+      - INSTALL_PARAVIEW=${INSTALL_PARAVIEW:-true}
+      - INSTALL_PALABOS=${INSTALL_PALABOS:-true}
+      - INSTALL_GEOMETRY_CENTRAL=${INSTALL_GEOMETRY_CENTRAL:-true}
+      - INSTALL_POLYSCOPE=${INSTALL_POLYSCOPE:-true}
+      - INSTALL_EIGEN3=${INSTALL_EIGEN3:-true}
+      - INSTALL_GL_HEADERS=${INSTALL_GL_HEADERS:-true}
+    user: root
+    stdin_open: true
+    tty: true
+    # Command specified at runtime
+
+  # Development runtime container
+  dev:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.runtime
+    profiles: ["dev"]
+    hostname: coral-machine
+    volumes:
+      - coral-workspace:/workspace  # Single volume contains everything including deps/
+      - ~/.ssh/authorized_keys:/tmp/authorized_keys:ro
+    ports:
+      - "2222:22"      # SSH
+      - "11111:11111"  # ParaView server
+    environment:
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility,graphics
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+    stdin_open: true
+    tty: true
+
+  # Test service to validate installation
+  test:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.builder
+    profiles: ["test"]
+    volumes:
+      - coral-workspace:/workspace:ro  # Single volume, read-only for testing
+    command: ["/workspace/deps/test-installation.sh"]
+    
+  # Service for cleaning/resetting volumes
+  clean:
+    image: alpine:latest
+    profiles: ["maintenance"]
+    volumes:
+      - coral-workspace:/workspace
+    command: |
+      sh -c "
+        echo 'WARNING: This will delete all data in the volume!'
+        echo 'Press Ctrl+C within 5 seconds to cancel...'
+        sleep 5
+        echo 'Cleaning volume...'
+        rm -rf /workspace/* /workspace/.[!.]* /workspace/..?*
+        echo 'Volume cleaned'
+      "
+
+volumes:
+  coral-workspace:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: ${WORKSPACE_VOLUME_PATH:-./volumes/workspace}
+
+networks:
+  default:
+    name: coral-network
