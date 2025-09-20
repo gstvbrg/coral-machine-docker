@@ -1,25 +1,31 @@
-# SSH keys - NEVER commit these
+# Local environment configuration
+.env
+
+# Volume directories (local bind mounts)
+volumes/
+volumes/deps/
+volumes/workspace/
+
+# Build artifacts
+*.log
+*.tmp
+.cache/
+
+# IDE files
+.vscode/
+.idea/
+
+# Docker build cache
+.docker/
+
+# SSH keys (never commit these!)
 authorized_keys
-*.pem
 *.key
+*.pem
 id_rsa*
 id_ed25519*
 
-# Build artifacts
-*.o
-*.exe
-build/
-cmake-build-*/
-
-# IDE files
-.idea/
-.vscode/
-*.swp
-*.swo
-
-# Docker
-.dockerignore
-
-# OS files
-.DS_Store
-Thumbs.db
+# Backup files
+*.backup
+*.bak
+*~
