@@ -1,0 +1,2039 @@
+.. include:: ../macros.hrst
+.. include:: ../abbreviations.hrst
+
+.. _chapter:ParallelDataVisualization:
+
+Remote and parallel visualization
+#################################
+
+One of the goals of the |ParaView| application is enabling data analysis and
+visualization for large datasets. |ParaView| was born out of the need for
+visualizing simulation results from simulations run on supercomputing
+resources that are often too big for a single desktop machine to
+handle. To enable interactive visualization of such datasets, |ParaView| uses
+remote and/or parallel data processing. The basic concept is that if a
+dataset cannot fit on a desktop machine due to memory or other
+limitations, we can split the dataset among a cluster of machines,
+driven from your desktop. In this chapter, we will look at the basics
+of remote and parallel data processing using |ParaView|. For information on
+setting up clusters, please refer to the |ParaView|
+Wiki :cite:`ParaViewServerSetup`.
+
+.. admonition:: **Did you know?**
+  :class: tip
+
+  Remote and parallel processing are often used together, but they refer to
+  different concepts, and it is possible to have one without the other.
+
+  In the case of ParaView, remote processing refers to the concept of
+  having a client, typically |paraview| or |pvpython|, connecting to a |pvserver|, which
+  could be running on a different, remote machine. All the data
+  processing and, potentially, the rendering can happen on the
+  |pvserver|. The client drives the visualization process by
+  building the visualization pipeline and viewing the generated results.
+
+  Parallel processing refers to a concept where instead of single core
+  --- which we call a ``rank`` --- processing the entire dataset, we
+  split the dataset among multiple ranks. Typically, an instance of
+  |pvserver| runs in parallel on more than one rank. If a
+  client is connected to a server that runs in parallel, we are using
+  both remote and parallel processing.
+
+  In the case of |pvbatch|, we have an application that operates in parallel
+  but without a client connection. This is a case of parallel
+  processing without remote processing.
+
+Understanding remote processing
+===============================
+
+Let's consider a simple use-case. Let's say you have two computers, one located
+at your office and another in your home. The one at the office is a nicer,
+beefier machine with larger memory and computing capabilities than the one at
+home. That being the case, you often run your simulations on the office
+machine, storing the resulting files on the disk attached to your office
+machine. When you're at work, to visualize those results, you simply launch
+|paraview| and open the data file(s). Now, what if you need to
+do the visualization and data analysis from home? You have several options:
+
+* You can copy the data files over to your home machine and then use
+  |paraview| to visualize them. This is tedious, however, as you not only
+  have to constantly keep copying/updating your files manually, but your machine
+  has poorer performance due to the decreased compute capabilities and memory
+  available on it!
+
+* You can use a desktop sharing system like *Remote Desktop* or
+  *VNC*, but those can be flaky depending on your network connection.
+
+Alternatively, you can use |ParaView|'s remote processing capabilities. The
+concept is fairly simple. You have two separate processes: |pvserver| (which runs
+on your work machine) and a |paraview| client (which runs on your home machine).
+They communicate with each other over sockets (over an SSH tunnel, if needed).
+As far as using |paraview| in this mode, it's no different than how we have been
+using it so far -- you create pipelines and then look at the data produced by
+those pipelines in views and so on. The pipelines themselves, however, are created
+remotely on the |pvserver| process. Thus, the pipelines have access to the disks
+on your work machine. The ``Open File`` dialog will in fact browse the file
+system on your work machine, i.e., the machine on which |pvserver| is running. Any
+filters that you create in your visualization pipeline execute on the
+|pvserver|.
+
+While all the data processing happens on the |pvserver|, when it
+comes to rendering, |paraview| can be configured to either do the rendering on
+the server process and deliver only images to the client (remote rendering)
+or to deliver the geometries to be rendered to the client and let it do the
+rendering locally (local rendering).
+When remote rendering, you'll be using the graphics capabilities on your work
+machine (the machine running the |pvserver|). Every time a new rendering needs to
+be obtained (for example, when pipeline parameters are changed or you interact
+with the camera, etc.), the |pvserver| process will re-render a new image and
+deliver that to the client. When local rendering, the geometries to be rendered
+are delivered to the client and the client renders those locally. Thus, not all
+interactions require server-side processing. Only when the
+visualization pipeline is updated does the server need to deliver
+updated geometries to the client.
+
+.. %One of the main purposes of |ParaView| is to allow you to create
+   %visualizations of large datasets that reside on remote systems
+   %without first bringing the data to a local machine. Transferring the
+   %data is often slow and wasteful of disk and network resources, and the
+   %visualization of large datasets can easily overwhelm the processing
+   %and especially memory resources of even high-performance
+   %workstations. To overcome these challenges, |ParaView| enables processing
+   %data on remote resources closer to where the data resides.
+   %
+   %To see how |ParaView| enables remote processing and explain where data is
+   %stored in the different |ParaView| executables, we refer back to
+   % :numref:`chapter:Introduction` where we saw how to create a simple
+   %processing and visualization pipeline using |paraview|. In this section, we
+   %will create that same pipeline while the |ParaView| client is connected to a
+   %remote server. Because |ParaView| was designed from the beginning to support
+   %remote processing, most of the steps involved in creating the pipeline
+   %are exactly the same as when |ParaView| is used locally without being
+   %connected to a remote server.
+
+.. _sec:RemoteVisualization:
+
+Remote visualization in ``paraview``
+====================================
+
+Starting a remote server
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+To begin using |ParaView| for remote data processing and visualization, we must
+first start the server application |pvserver| on the remote system. To do this,
+connect to your remote system using a shell and run:
+
+.. code-block:: shell
+
+  > pvserver
+
+You will see this startup message on the terminal:
+
+.. code-block:: shell
+
+  Waiting for client...
+  Connection URL: cs://myhost:11111
+  Accepting connection(s): myhost:11111
+
+This means that the server has started and is listening for a
+connection from a client.
+
+Configuring a server connection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To connect to this server with the
+|paraview| client, select :guilabel:`File > Connect` or click
+the |pqConnect| icon in the toolbar to bring up the
+``Choose Server Configuration`` dialog.
+
+.. figure:: ../images/Server_connect_dialog.png
+    :name: fig:server_connect_dialog
+    :width: 60%
+    :align: center
+
+    The ``Choose Server Configuration`` dialog is used to connect to a server.
+
+.. admonition:: **Common Errors**
+   :class: error
+
+   If your server is behind a firewall and you are attempting to connect
+   to it from outside the firewall, the connection may not be established
+   successfully. You may also try reverse connections ( :numref:`sec:ReverseConnections`)
+   as a workaround for firewalls. Please consult your
+   network manager if you have network connection problems.
+
+Figure :numref:`fig:server_connect_dialog` shows the ``Choose Server
+Configuration`` dialog with a number of entries for remote servers.  In
+the figure, a number of servers have already been configured, but when
+you first open this dialog, this list will be empty. Before you can
+connect to a remote server, you will need to add an entry to the list
+by clicking on the ``Add Server`` button. When you do, you will see
+the ``Edit Server Configuration`` dialog as in
+Figure :numref:`fig:edit_server_configuration_dialog`.
+
+.. figure:: ../images/ParaView_UsersGuide_ConfigureNewServerDialog.png
+    :name: fig:edit_server_configuration_dialog
+    :width: 80%
+    :align: center
+
+    The ``Edit Server Configuration`` dialog is used to
+    configure settings for connecting to remote servers.
+
+You will need to set a name for the connection, the server type, the
+DNS name of the host on which you just started the server, and the
+port. The default ``Server Type`` is set to Client / Server, which
+means that the server will be listening for an incoming connection
+from the client. There are several other options for this setting that
+we will discuss later.
+
+When you are done, click the ``Configure`` button. Another dialog, as
+shown in :numref:`fig:ConfigureServerManualDialog`, will appear
+where you specify how to start the server. Since we started the server
+manually, we will leave the ``Startup Type`` on the default
+``Manual`` setting. You can optionally set the ``Startup Type`` to
+``Command`` and specify an external shell command to launch a server
+process.
+
+.. figure:: ../images/ParaView_UsersGuide_ConfigureServerManualDialog.png
+    :name: fig:ConfigureServerManualDialog
+    :width: 80%
+    :align: center
+
+    Configure the server manually. It must be started outside of ParaView.
+
+When you click the ``Save`` button, this particular server
+configuration will be saved for future use. You can go back and edit
+the server configuration by selecting the entry in the list of servers
+and clicking the ``Edit Server`` button in the ``Choose Server
+Configuration`` dialog. You can delete it by clicking the ``Delete``
+button.
+
+Server configurations can be imported and exported through the
+``Choose Server Configuration`` dialog. Use the ``Load Servers``
+button to load a server configuration file and the ``Save Servers``
+button to save a server configuration file. Files can be exchanged
+with others to access the same remote servers.
+
+.. admonition:: **Did you know?**
+   :class: tip
+
+   Visualization centers can provide system-wide server configurations on
+   web servers to allow non-experts to simply select an already
+   configured |ParaView| server.  These site-wide settings can be
+   loaded with the ``Fetch Servers`` button. Advanced users may also want
+   to specify their own servers in more details.
+   These features are provided thanks to ParaView Server Configuration files
+   (:numref:`sec:ParaViewServerConfigurationfiles`).
+
+.. _subsec:ConnectToRemoteServer:
+
+Connect to the remote server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To connect to the server, select the server configuration you just set
+up from the configuration list, modify the timeout in the timeout combo
+box if needed and click ``Connect``. ParaView will try to connect to
+the server until it succeed or timeout is reached. In that case, you can just
+retry as needed. Once the connection steps succeed, we are now connected and
+ready to build the visualization pipelines.
+
+.. admonition:: **Common Errors**
+   :class: error
+
+   ParaView does not perform any kind of authentication when clients
+   attempt to connect to a server. For that reason, we recommend that you
+   do not run |pvserver| on a computing resource that is open to the outside
+   world.
+
+   ParaView also does not encrypt data sent between the client and
+   server. If your data is sensitive, please ensure that proper network
+   security measures have been taken. The typical approach is to use an
+   SSH tunnel within your server configuration files using native SSH support
+   (:numref:`sec:SecuredSSHTunnel`).
+
+Managing multiple clients
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+|pvserver| can be configured to accept connections from multiple clients at the same time.
+In this case only one, called the master, can interact with the pipeline.
+Others clients are only allowed to visualize the data. The ``Collaboration Panel``
+shares information between connected clients.
+
+To enable this mode, |pvserver| must be started with the ``--multi-clients`` flag:
+
+.. code-block:: shell
+
+  pvserver --multi-clients
+
+If your remote server is accessible from many users, you may want to restrict the access.
+This can be done with a connect id.
+If your client does not have the same connect-id as the server you want to connect to,
+you will be prompted for a connect-id.
+Then, if you are the master, you can change the connect-id in the ``Collaboration Panel``.
+
+Note that initial value for connect-id can be set by starting the |pvserver|
+(and respectively |paraview|) with the ``--connect-id`` flag, for instance:
+
+.. code-block:: shell
+
+  pvserver --connect-id=147
+
+The master client can also disable further connections in the ``Collaboration Panel``
+so you can work alone, for instance. Once you are ready, you may allow other people to connect
+to the |pvserver| to share a visualization. This is the default feature when |pvserver| is
+started with ``--multi-clients --disable-further-connections``.
+
+Setting up a client/server visualization pipeline
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Using |paraview| when connected to a remote server is not any different than when
+it's being used in the default stand-alone mode. The only difference, as far as
+the user interface goes, is that the ``Pipeline Browser`` reflects the name of
+the server to which you are connected. The address of the server connection next to
+the |pqServer| icon changes from ``builtin``
+to ``cs://myhost:11111`` .
+
+Since the data processing pipelines are executing on the server side, all file
+I/O also happens on the server side. Hence, the ``Open File`` dialog, when
+opening a new data file, will browse the file system local to the |pvserver|
+executable and not the |paraview| client.
+
+.. %Where does rendering occur?
+   ^^^^^
+   %
+   %When the |paraview| client is connected to a server, rendering may take
+   %place on either the client or the server. When the memory footprint of
+   %the geometry representing a pipeline module is below a threshold you
+   %specify, the geometry will be sent to the client for local
+   %rendering. For large data, transferring the geometry to the client may
+   %take too long, or the computing resources on the client machine may be
+   %insufficient to store and display the data. In such cases, rendering
+   %takes place on the server, and rendered images are sent to the client
+   %for display. The geometry memory size threshold used to determine when
+   %rendering occurs on the client versus on the server is defined through
+   %the :guilabel:`Edit > Settings` menu item on the ``Render View`` tab in
+   %the ``Remote/Parallel Rendering Options`` section.
+   %
+   %The full geometry for a pipeline module is used for rendering still
+   %frames when you are not interacting with the 3D scence.  If this
+   %geometry is smaller than the geometry memory size threshold, still
+   %frames will be rendered locally on the client. Otherwise, they are
+   %rendered on the server.
+   %
+   %A decimated version of the geometry is optionally available for
+   %rendering while you are interacting with the 3D scene. Decimation is a
+   %process where the number of vertices and faces in a geometry are
+   %reduced in a way that attempts to preserve shape while reducing the
+   %memory footprint of the geometry. If the decimated geometry is less
+   %than the geometry memory size threshold, it will be sent to the client
+   %for client-side rendering during interaction. A separate geometry
+   %memory size threshold that controls when the decimated geometry is
+   %used is available in the ``Interactive Rendering Options`` section of
+   %the ``Render View`` settings panel.
+   %
+   %The use of decimated geometry for interactive rendering and full
+   %geometry for still frames is meant to provide the advantages of local
+   %rendering (higher frame rates and lower latency when interacting) and
+   %remote rendering (greater large data capability) in a large number of
+   %cases.
+   %
+   %Adding filters
+   ^^^^^
+   %
+   %Adding filters to the pipeline works exactly the same as
+   %when |ParaView| is using the built-in server. To continue our example
+   %from  :numref:`chapter:Introduction`, click on the ``Sphere1``
+   %module in the ``Pipeline Browser`` and select :guilabel:`Filters >
+   %Shrink`. When you click ``Apply`` , the Shrink filter will execute on
+   %the |pvserver| and, depending on the geometry memory size thresholds
+   %you, sends the output geometry to the |paraview| client to render.
+   %
+   %Loading remote data files
+   ^^^^^
+   %
+   %When the |ParaView| client is connected to a remote server, the files
+   %displayed in the ``Open File`` dialog that appear when :guilabel:`File >
+   %Open` is selected are all on the file system of the remote system.  As
+   %in the case when |paraview| is running without a remote connection, the
+   %reader will appear as another pipeline module.
+
+.. _sec:RemoteVisualizationPython:
+
+Remote visualization in ``pvpython``
+====================================
+
+The |pvpython| executable can be used by itself for visualization of local
+data, but it can also act as a client that connects to a remote |pvserver|.
+Before creating a pipeline in |pvpython|, use the ``Connect`` function:
+
+.. code-block:: python
+
+  # Connect to remote server "myhost" on the default port, 11111
+  >>> Connect("myhost") # Connect to remote server "myhost" on a
+                        # specified port
+  >>> Connect("myhost", 11111)
+
+Now, when new sources are created, the data produced by the sources
+will reside on the server. In the case of |pvpython|, all data remains on
+the server and images are generated on the server too. Images are
+sent to the client for display or for saving to the local filesystem.
+
+.. _sec:ReverseConnections:
+
+Reverse connections
+===================
+
+It is frequently the case that remote computing resources are located
+behind a network firewall, making it difficult to connect a client
+outside the firewall to a server behind it. |ParaView| provides a way to
+set up a *reverse connection* that reverses the usual client
+server roles when establishing a connection.
+
+To use a remote connection, two steps must be performed. First,
+in |paraview|, a new connection must be configured with the connection type
+set to reverse. To do this, open the ``Choose Server Configuration``
+dialog through the :guilabel:`File > Connect` menu item. Add a new
+connection, setting the ``Name`` to ``myhost (reverse)'', and select
+``Client / Server (reverse connection)`` for ``Server Type`` . Click
+``Configure`` . In the ``Edit Server Launch Configuration`` dialog that
+comes up, set the ``Startup Type`` to ``Manual`` . Save the
+configuration. Next, select this configuration and click ``Connect`` .
+A message window will appear showing that the client is awaiting a
+connection from the server.
+
+.. figure:: ../images/WaitingForServerConnection.png
+    :name: fig:WaitingForServerConnection
+    :width: 60%
+    :align: center
+
+    Message window showing that the client is awaiting a connection from a server.
+
+Second, |pvserver| must be started with the ``--reverse-connection``
+(``-rc``) flag. To tell |pvserver| the name of the client, set
+the ``--client-host`` (``-ch``) command-line argument to the
+hostname of the machine on which the |paraview| client is running.  You
+can specify a port with the ``--server-port`` (``-sp``)
+command-line argument.
+
+.. code-block:: shell
+
+  pvserver -rc --client-host=mylocalhost --server-port=11111
+
+When the server starts, it prints a message indicating the success or
+failure of connecting to the client. When the connection is
+successful, you will see the following text in the shell:
+
+.. code-block:: shell
+
+  Connecting to client (reverse connection requested)...
+  Connection URL: csrc://mylocalhost:11111
+  Client connected.
+
+.. admonition:: **Did you know?**
+   :class: tip
+
+   Most connection related command line option can be set using a server settings
+   file, as described in this section: :numref:`sec:ConfiguringServerSettings`
+
+To wait for reverse connections from a |pvserver| in |pvpython|, you use
+``ReverseConnect`` instead of ``Connect`` .
+
+ .. code-block:: python
+
+  # To wait for connections from a 'pvserver' on the default port 11111
+  >>> ReverseConnect()
+
+  # Optionally, you can specify the port number as the argument.
+  >>> ReverseConnect(11111)
+
+.. _sec:ParaViewServerConfigurationFiles:
+
+ParaView Server Configuration Files
+===================================
+
+In the ``Choose Server Configuration`` dialog, it is possible
+to ``Load Servers`` and ``Save Servers`` using the dedicated buttons.
+Server configurations are stored in ParView Server Configuration files (.pvsc).
+
+These files make it possible to extensively customize the server connection process.
+During startup, ParaView looks at several locations for server configurations to load by default.
+
+* On Unix-based systems and macOS
+    * ``default_servers.pvsc`` in the ParaView executable directory (you can do a ``ls -l /proc/<paraview PID here>/exe`` to identify the executable directory)
+    * under each of ``XDG_DATA_DIRS``, looking for ``ParaView/servers.pvsc``.
+    * ``/usr/local/share/ParaView/servers.pvsc`` or ``/usr/share/ParaView/servers.pvsc``
+    * ``$HOME/.config/ParaView/servers.pvsc`` (ParaView will save user defined servers here)
+
+* On Windows
+    * ``default_servers.pvsc`` in the ParaView executable directory
+    * ``%COMMON_APPDATA%\ParaView\servers.pvsc``
+    * ``%APPDATA%\ParaView\servers.pvsc`` (ParaView will save user defined servers here)
+
+The exact procedure to find the writable directory is detailed in
+:numref:`sec:ConfigurationLocations`.
+
+Here are a few examples of some common use-cases.
+
+Case One: Simple command server startup
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In this use-case, we are connecting to a locally started pvserver (``localhost``) on the 11111 port,
+except that the command to start the server will be automatically called just before connecting to the server,
+we will wait for ``timeout`` seconds before aborting the connection.
+
+.. code-block:: xml
+
+  <Server name="case01" resource="cs://localhost:11111" timeout="10">
+    <CommandStartup>
+      <Command process_wait="0" delay="5" exec="/path/to/pvserver"/>
+    </CommandStartup>
+  </Server>
+
+Here, ``CommandStartup`` element specify that a command will be run before connecting to the server.
+The ``Command`` element contains the details about this command, which includes
+``process_wait``, the time in seconds that paraview will wait for the process to start,
+``delay``, the time in seconds paraview will wait after running the command to try to connect and finally,
+``exec``, which is the command that will be run and usually contains the path to |pvserver| but could also
+contain a mpi command to start |pvserver| distributed or to any script or executable on the ``localhost``
+filesystem.
+
+Case Two: Simple remote server connection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In this use-case, we are setting a configuration for a simple server connection (to a |pvserver| processes) running on a node named "amber1", at port 20234.
+The |pvserver| process will be started manually by the user.
+
+.. code-block:: xml
+
+  <Server name="case02" resource="cs://amber1:20234">
+    <ManualStartup/>
+  </Server>
+
+Here, ``name`` specify the name of the server as it will appear in the pipeline browser, ``resource`` identifies the type if the connection (cs -- implying client-server), host name and port.
+If the port number i.e. :20234 part is not specified in the resource, then the default port number (which is 11111) is assumed. Since the user starts |pvserver| processes manually, we use ``ManualStartup``.
+
+Case Three: Server connection with user-specified port
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This is the same as case two except that we want to ask the user each time the port number to connect to the |pvserver| at.
+
+.. code-block:: xml
+
+  <Server name="case03" resource="cs://amber1">
+    <ManualStartup>
+      <Options>
+        <Option name="PV_SERVER_PORT" label="Server Port: ">
+          <Range type="int" min="1" max="65535" step="1" default="11111" />
+        </Option>
+      </Options>
+    </ManualStartup>
+  </Server>
+
+Here the only difference is the ``Options`` element.
+This element is used to specify run-time options that the user specifies when connecting to the server, see this section for a list of available run-time options.
+In this case, we want to show the user an integral spin-box to select the port number, hence we use the ``Range`` element to specify the type of the option.
+When the user connects to this server, he is shown a dialog similarly to the following image:
+
+.. figure:: ../images/Server_connection_pvsc_case03.png
+    :width: 20%
+    :align: center
+
+Case Four: Simple connection to a data-server/render-server
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This is the same as case two, except that instead of a single server (i.e. |pvserver|),
+we are connecting to a separate render-server/data-server with |pvdataserver| running on port 20230 on amber1 and |pvrenderserver| running port 20233 on node amber2.
+
+.. code-block:: xml
+
+  <Server name="case04" resource="cdsrs://amber1:20230//amber2:20233">
+    <ManualStartup />
+  </Server>
+
+The only difference with case two, is the ``resource`` specification. ``cdsrs`` indicates that it is a client-dataserver-renderserver configuration.
+The first ``host:port`` pair is the dataserver while the second one is the render server.
+
+Case Five: Connection to a data-server/render-server with user specified server port
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This is a combination of case three and case four, where we want to ask the user for the port number for both the render server and the data server.
+
+.. code-block:: xml
+
+  <Server name="case05" resource="cdsrs://localhost//localhost">
+    <ManualStartup>
+      <Options>
+        <Option name="PV_DATA_SERVER_PORT" label="Data Server Port: ">
+          <Range type="int" min="1" max="65535" step="1" default="11111" />
+        </Option>
+        <Option name="PV_RENDER_SERVER_PORT" label="Render Server Port: ">
+          <Range type="int" min="1" max="65535" step="1" default="22222" />
+        </Option>
+      </Options>
+    </ManualStartup>
+  </Server>
+
+The XML is quite self-explanatory given what we has already been explained above.
+The options dialog produced by this XML looks as follows:
+
+.. figure:: ../images/Server_connection_pvsc_case05.png
+    :width: 30%
+    :align: center
+
+Case Six: Reverse Connection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+By default the client connects to the server processes. However it is possible to tell the paraview client to wait for the server to connect to it instead.
+This is called a reverse connection. In such a case the server processes must be started with ``--reverse-connection`` or ``--rc`` flag.
+
+To indicate reverse connection in the server configuration xml, the only change is suffixing the ``resource`` protocol part with ``rc`` (for reverse connection). eg.
+
+.. code-block:: xml
+
+ resource="csrc://localhost" -- connect to pvserver on localhost using reverse connection
+ resource="cdsrsrc://localhost//localhost" -- connect to pvdataserver/pvrenderserver using reverse connection.
+
+So a simple local reverse connection server configuration, similarly to case one, would look like this
+
+.. code-block:: xml
+
+  <Server name="case06" resource="csrc://localhost:11111">
+    <CommandStartup>
+      <Command exec="/path/to/pvserver --reverse-connection --client-host=localhost"/>
+    </CommandStartup>
+  </Server>
+
+Here the ``--client-host=localhost`` in the ``exec`` is actually not needed has this is the default.
+
+Case Seven: Server command with option
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+As we have seen in case one, the server can be started by ParaView on connection, but this can be combined with the ``Option`` element
+as seen in case three to create a dynamically generated server command.
+
+.. code-block:: xml
+
+  <Server name="case07" resource="cs://localhost">
+    <CommandStartup>
+      <Options>
+        <!-- The user chooses the port on which to start the server -->
+        <Option name="PV_SERVER_PORT" label="Server Port: ">
+          <Range type="int" min="1" max="65535" step="1" default="11111" />
+        </Option>
+      </Options>
+      <Command delay="5" exec="/path/to/pvserver">
+        <Arguments>
+          <Argument value="--server-port=$PV_SERVER_PORT$" />
+        </Arguments>
+      </Command>
+    </CommandStartup>
+  </Server>
+
+As with case one, we are using ``CommandStartup`` and ``Command`` elements.
+Command line arguments can be passed to the command executed using the ``Arguments`` element.
+All runtime environment variables specified as ``$name$`` are replaced with the actual values.
+Eg. in this case ``$PV_SERVER_PORT$`` gets replaced by the port number chosen by the user in the options dialog.
+
+Case Eight: Using connection-id and random port
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In many cases, a server cluster may be running multiple pvserver (or pvdataserver/pvrenderserver) processes for different users.
+In that case we need some level of authentication between the server and the client.
+This can be achieved (at a very basic level) with the connect-id option.
+If specified on the command line when starting the server processes (using ``--connect-id``) then the server will allow only that client which reports the same connection id to connect.
+
+We also want to avoid port collision with other users, so we use a random port for the server connection.
+
+Here is an example similarly to case seven but with a connect-id option and random server port.
+
+.. code-block:: xml
+
+  <Server name="case08" resource="cs://localhost">
+    <CommandStartup>
+      <Options>
+        <Option name="PV_CONNECT_ID" label="Connect ID" readonly="true">
+          <Range type="int" min="1" max="65535" default="random" />
+        </Option>
+        <Option name="PV_SERVER_PORT" label="Server Port" readonly="true">
+          <Range type="int" min="11111" max="65535" default="random" />
+        </Option>
+      </Options>
+      <Command exec="/path/to/pvserver" delay="5">
+        <Arguments>
+          <Argument value="--connect-id=$PV_CONNECT_ID$" />
+          <Argument value="--server-port=$PV_SERVER_PORT$" />
+        </Arguments>
+      </Command>
+    </CommandStartup>
+  </Server>
+
+In this case, the ``readonly`` attribute on the ``Option`` indicates that the value cannot be changed by the user, it is only shown for information purposes.
+The default value for the ``PV_CONNECT_ID`` and ``PV_SERVER_PORT`` is set to random so that ParaView makes up a value at run time.
+Of course, in a production environnement they should be assigned by user instead of randomly generated.
+
+.. figure:: ../images/Server_connection_pvsc_case08.png
+    :width: 20%
+    :align: center
+
+Case Nine: Starting server using ssh
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+In this use case the server process is spawned on some remote host using specifically crafted ssh command. We want the user to be able to specify the ssh executable.
+We also want to preserve the ssh executable path across ParaView sessions so that the user does not have to enter it each time.
+
+.. code-block:: xml
+
+  <Server name="case09" resource="cs://localhost:11111">
+    <CommandStartup>
+      <Options>
+        <Option name="SSH_USER" label="SSH Username" save="true">
+          <!-- choose the username. Since 'save' is true, this value will
+               be maintained across sessions -->
+          <String default="user" />
+        </Option>
+        <Option name="SSH_EXE" label="SSH Executable" save="true">
+          <!-- select the SSH executable. Since 'save' is true, this value will
+               also be maintinaed across sessions -->
+          <File default="ssh" />
+        </Option>
+      </Options>
+      <Command exec="$SSH_EXE$" delay="5">
+        <Arguments>
+          <Argument value="-L8080:amber5:11111" /> <!-- port forwarding -->
+          <Argument value="amber5" />
+          <Argument value="-l" />
+          <Argument value="$SSH_USER$" />
+          <Argument value="/path/to/pvserver" />
+        </Arguments>
+      </Command>
+    </CommandStartup>
+  </Server>
+
+.. figure:: ../images/Server_connection_pvsc_case09.png
+    :width: 30%
+    :align: center
+
+Note here that the value for the ``exec`` attribute is set to ``$SSH_EXE$`` hence it gets replaced by the user selected ssh executable.
+We use the optional attribute ``save`` on the ``Option`` element to tell ParaView to preserve the user chosen value across ParaView sessions
+so that the user doesn't have to enter the username and the ssh executable every time he wants to connect to this server.
+
+.. admonition:: **Did you know?**
+  :class: tip
+
+  While SSH connection can be started by crafting the command, ParaView
+  now support SSH connection natively by specyfing a ``SSHCommand``, see below
+  for more information.
+
+Case Ten: Starting server using custom script with custom user-settable options
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This example will illustrate the full capability of server configuration.
+Suppose we have a custom script "MyServerStarter" that takes in multiple arguments to start the server process.
+We want the user to be able to set up values for these arguments when he tries to connect to using this configuration.
+As an example, let's say MyServerStarter takes the following arguments:
+
+ * ``--force-offscreen-rendering`` -- to indicate use of offscreen rendering
+ * ``--force-onscreen-rendering`` -- to indicate on-screen rendering (this can be assumed from absence of ``--force-offscreen-rendering``, but we are using it as an example)
+ * ``--session-name=<string>`` -- some string identifying the session
+ * ``--mpitype=<mpich1.2|mpich2|openmpi>`` -- choose between available MPI implementations
+ * ``--num-procs=<num>`` -- number of server processess
+ * ``--server-port`` -- port number passed the pvserver processes
+
+All (except the --server-port) of these must be settable by the user at the connection time. This can be achieved as follows:
+
+.. code-block:: xml
+
+  <Server name="case10" resource="cs://localhost">
+    <CommandStartup>
+      <Options>
+        <Option name="OFFSCREEN" label="Use offscreen rendering">
+          <Boolean true="--use-offscreen" false="--use-onscreen" default="false" />
+        </Option>
+        <Option name="SESSIONID" label="Session Identifier">
+          <String default="session01"/>
+        </Option>
+        <Option name="MPITYPE" label="MPI Implementation">
+          <Enumeration default="mpich1.2">
+            <Entry value="mpich1.2" label="MPICH Ver. 1.2" />
+            <Entry value="mpich2" label="MPICH Ver 2.0" />
+            <Entry value="openmpi" label="Open MPI" />
+          </Enumeration>
+        </Option>
+        <Option name="NUMPROC" label="Number Of Processes">
+          <Range type="int" min="1" max="256" step="4" default="1" />
+        </Option>
+      </Options>
+      <Command exec="/path/to/MyServerStarter" delay="5">
+        <Arguments>
+          <Argument value="--server-port=$PV_SERVER_PORT$" />
+          <Argument value="--mpitype=$MPITYPE$" />
+          <Argument value="--num-procs=$NUMPROC$" />
+          <Argument value="$OFFSCREEN$" />
+          <Argument value="--session-name=$SESSIONID$" />
+        </Arguments>
+      </Command>
+    </CommandStartup>
+  </Server>
+
+Each ``Option`` defines a new run-time variable that can be accessed as ``${name}$`` in the ``Command`` section.
+When the user tries to connect using this configuration, he is shown the following options dialog:
+
+.. figure:: ../images/Server_connection_pvsc_case10.png
+    :width: 30%
+    :align: center
+
+This can be extended to start the server processes using ssh or any batch scheduler etc. as may be the required by the server administrator.
+This can also be set up to use reverse connection (by changing the protocol in the resource attribute).
+
+Case Eleven: Case Ten + Switch Statement
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+This is same as case ten with one change: We no longer allow the user to choose the number of processes.
+Instead, the number of processes is automatically selected based on the value of the distribution combobox.
+
+.. code-block:: xml
+
+  <Server name="case11" resource="cs://localhost">
+    <CommandStartup>
+      <Options>
+        <Option name="OFFSCREEN" label="Use offscreen rendering">
+          <Boolean true="--use-offscreen" false="--use-onscreen" default="false" />
+        </Option>
+        <Option name="SESSIONID" label="Session Identifier">
+          <String default="session01"/>
+        </Option>
+        <Option name="MPITYPE" label="MPI Implementation">
+          <Enumeration default="mpich1.2">
+            <Entry value="mpich1.2" label="MPICH Ver. 1.2" />
+            <Entry value="mpich2" label="MPICH Ver 2.0" />
+            <Entry value="openmpi" label="Open MPI" />
+          </Enumeration>
+        </Option>
+        <Option name="DISTRIBUTION" label="Distribution Mode">
+          <Enumeration default="notDistributed">
+            <Entry value="notDistributed" label="Not Distributed" />
+            <Entry value="someDistribution" label="Some Distribution" />
+            <Entry value="highDistribution" label="Highly Distributed" />
+          </Enumeration>
+        </Option>
+        <Switch name="DISTRIBUTION">
+          <Case value="notDistributed">
+            <Set name="NUMPROC" value="1" />
+          </Case>
+          <Case value="someDistribution">
+            <Set name="NUMPROC" value="2" />
+          </Case>
+          <Case value="highDistribution">
+            <Set name="NUMPROC" value="10" />
+          </Case>
+        </Switch>
+      </Options>
+      <Command exec="/path/to/MyServerStarter" delay="5">
+        <Arguments>
+          <Argument value="--server-port=$PV_SERVER_PORT$" />
+          <Argument value="--mpitype=$MPITYPE$" />
+          <Argument value="--num-procs=$NUMPROC$" />
+          <Argument value="$OFFSCREEN$" />
+          <Argument value="--session-name=$SESSIONID$" />
+        </Arguments>
+      </Command>
+    </CommandStartup>
+  </Server>
+
+.. figure:: ../images/Server_connection_pvsc_case11.png
+    :width: 30%
+    :align: center
+
+The ``Switch`` statement can only have ``Case`` statements as children, while the ``Case`` statement can only have ``Set`` statements as children.
+``Set`` statements are not much different from ``Option`` except that the value is fixed and the user is not prompted to set that value.
+
+Case Twelve: Simple SSH run server command
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+If ``Command`` element let you craft SSH commands, it can be quite complex to do so and the pipeline
+browser in ParaView may not show the correct server as it could connect through a ssh tunnel.
+
+Here, similarly to case one, we use native ssh support to start a pvserver process remotely, on amber1,
+before connecting to it directly on the default port:
+
+.. code-block:: xml
+
+  <Server name="case12" resource="cs://amber1">
+    <CommandStartup>
+      <SSHCommand exec="/path/to/pvserver" delay="5">
+        <SSHConfig user="user"/>
+      </SSHCommand>
+    </CommandStartup>
+  </Server>
+
+First ``SSHCommand`` element is used instead of ``Command`` so that ParaView knows to use native ssh support.
+Then the ``SSHConfig`` element is used to configure the ssh connection. The ``user`` attribute is the SSH user to use with SSH.
+If a password is needed, it will be asked on the terminal used to run ParaView, which may not be visible in certain cases.
+
+Case Thirteen: SSH run server command with complex config
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Here, similarly to case twelve, we use native ssh support to start a pvserver process remotely, on amber1,
+before connecting to it directly, but we specify much more specifically the configuration to use.
+
+.. code-block:: xml
+
+  <Server name="case13" resource="cs://amber1">
+    <CommandStartup>
+      <Options>
+        <!-- The user chooses the port on which to start the server -->
+        <Option name="PV_SERVER_PORT" label="Server Port: ">
+          <Range type="int" min="1" max="65535" step="1" default="11111" />
+        </Option>
+      </Options>
+      <SSHCommand exec="/path/to/pvserver" delay="5">
+        <SSHConfig user="user" port="2222">
+          <Terminal exec="/usr/bin/xterm"/>
+          <SSH exec="/usr/bin/ssh"/>
+        </SSHConfig>
+        <Arguments>
+          <Argument value="--server-port=$PV_SERVER_PORT$"/>
+        </Arguments>
+      </SSHCommand>
+    </CommandStartup>
+  </Server>
+
+Inside the ``SSHConfig`` element, we use different elements.
+First, we added a ``port`` attribute to specify which port to use, using the ``-p`` option of the SSH command.
+Here, ``Terminal`` element is used to specify that ParaView will try to open a terminal to ask the
+user for his password. Here, the terminal executable is specified using the ``exec`` attribute.
+If it was not, ParaView would try to find one automatically (Linux and Windows).
+On Linux and macOS, it is possible to specify the ``command_option`` to use with the terminal executable.
+This is needed when using gnome-terminal, eg: ``<Terminal exec="/usr/bin/gnome-terminal" command_option="--"/>``
+When troubleshooting server configuration, not using ``Terminal`` element is suggested
+as the terminal will close as soon as the command finish executing.
+On Linux, it is also possible to replace the ``Terminal`` element by the ``AskPass`` element
+to specify the ParaView should use SSH_ASKPASS so that a ask-pass binary is used when asking
+for the SSH password.
+Finally, the ``SSH`` element specify the SSH binary to use thanks to its ``exec`` attribute.
+
+We also use ``PV_SERVER_PORT``, similarly to case seven to let the user select the port to connect to.
+
+Case Fourteen: SSH run server command with user chosen config
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Here, similarly to case thirteen and five, we use native ssh support to start a pvserver process remotely, on amber1,
+before connecting to it directly, but we let the user choose interactively some SSH options.
+
+.. code-block:: xml
+
+  <Server name="case14" resource="cs://amber1">
+    <CommandStartup>
+      <Options>
+        <Option label="SSH USER:" name="SSH_USER" save="true">
+          <String default="user"/>
+        </Option>
+        <Option label="SSH Exec:" name="SSH_EXEC" save="true">
+          <File default="/usr/bin/ssh" />
+        </Option>
+        <Option label="Terminal:" name="TERMINAL" save="true">
+          <File default="/usr/bin/xterm"/>
+        </Option>
+      </Options>
+      <SSHCommand exec="/path/to/pvserver" delay="5">
+        <SSHConfig user="$SSH_USER$">
+          <Terminal exec="$TERMINAL$"/>
+          <SSH exec="$SSH_EXEC$"/>
+        </SSHConfig>
+        <Arguments>
+          <Argument value="--server-port=$PV_SERVER_PORT$"/>
+        </Arguments>
+      </SSHCommand>
+    </CommandStartup>
+  </Server>
+
+Similarly to all other options, SSH related options can be set interactively by the user.
+Here we let the user set the SSH user, the SSH executable as well as the Terminal executable
+to use when connecting through ssh.
+
+.. figure:: ../images/Server_connection_pvsc_case14.png
+    :width: 30%
+    :align: center
+
+Case Fifteen: Ssh run server command with reverse connection
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Similarly to case twelve and thirteen, we use native ssh support to start a
+reverse connection pvserver process remotely, on amber1, before letting it
+connect to ParaView using the hostname of the client on static non-default port.
+
+.. code-block:: xml
+
+  <Server name="case15" resource="csrc://amber1:11112">
+    <CommandStartup>
+      <SSHCommand exec="/path/to/pvserver" delay="5">
+        <SSHConfig user="user">
+          <Terminal/>
+        </SSHConfig>
+        <Arguments>
+          <Argument value="--reverse-connection"/>
+          <Argument value="--client-host=$PV_CLIENT_HOST$"/>
+          <Argument value="--server-port=$PV_SERVER_PORT$"/>
+        </Arguments>
+      </SSHCommand>
+    </CommandStartup>
+  </Server>
+
+The only difference with case twelve is in the ``ressource``, which now contain the reverse connection
+as well as the usage of ``$PV_CLIENT_HOST$`` in the arguments for the reverse connection,
+automatically set to the hostname of the client which the server should be able to resolve to an ip
+to connect to.
+
+.. _sec:SecuredSSHTunnel:
+
+Case Sixteen: Secured Connection to a Server trough SSH tunnel
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+To communicate securely through a ssh tunnel, something usually done with a crafted command looking like this:
+``ssh -L local_port:localhost:server_port user@remote /path/to/pvserver --server-port server_port``
+
+You would then connect on a server on ``localhost:local_port`` within ParaView.
+This is complex to set up either manually of with a ``Command`` element. Also,
+the true server and port will not appear in the pipeline browser in ParaView.
+
+This is however natively supported with ``SSHCommand`` element.
+Here we create a secured SSH tunnel to amber1 before connecting through the SSH tunnel on
+the 11111 port, the local ParaView client internally uses the 8080 port.
+
+.. code-block:: xml
+
+  <Server name="case16" resource="cs://amber1:11111">
+    <CommandStartup>
+      <SSHCommand exec="/path/to/pvserver" delay="5">
+        <SSHConfig user="user">
+          <Terminal/>
+          <PortForwarding local="8080"/>
+        </SSHConfig>
+        <Arguments>
+          <Argument value="--server-port=$PV_SERVER_PORT$"/>
+        </Arguments>
+      </SSHCommand>
+    </CommandStartup>
+  </Server>
+
+Similarly to case thirteen, we only add a ``PortForwarding`` element in the ``SSHConfig`` element with the optional ``local`` attribute port,
+so that ParaView creates a SSH tunnel to connect through.
+If ``local`` attribute is not specified, the server port will be used.
+The ``$PV_SERVER_PORT$`` is automatically set to the value of the port to use within the SSH tunnel.
+In ParaView, the tunnel will be integrated nicely in the UI with the correct port and hostname in the pipeline browser,
+the server icon will look different with a small lock to note the secured nature of this connection:
+
+.. figure:: ../images/Server_connection_pvsc_case16.png
+    :width: 30%
+    :align: center
+
+Case Seventeen: Secured Reverse Connection from a HPC node trough SSH tunnel running on a gateway
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Similarly to case sixteen, a reverse connection through a SSH tunnel would require to craft a command like this one:
+``ssh -R server_port:localhost:local_port user@gateway /path/to/submit_script_pvserver.sh --reverse-connection --client-host gateway --server-port server_port``
+
+We assume ``submit_script_pvserver.sh`` is a shell script that will request and connect to a HPC node and then execute ``pvserver`` with
+the bash arguments of the script.
+
+That would connect to an already waiting ParaView client ready for a reverse connection server on ``localhost:local_port``.
+This is complex to set up either manually or with a ``Command`` element.
+Also, the true server host and port will not appear in the pipeline browser in ParaView.
+
+This is however natively supported with ``SSHCommand``.
+Here we create a reverse secured SSH tunnel to gateway, in order to run a submission script which will then, access a compute node and reverse connect
+to the client through the SSH tunnel running on the gateway, using port 11115.
+The local ParaView client internally uses the 8080 port.
+
+Please note the SSH server on the gateway **must** have ``GatewayPort yes`` in its configuration.
+
+.. code-block:: xml
+
+  <Server name="case17" resource="csrc://gateway:11115">
+    <CommandStartup>
+      <SSHCommand exec="/path/to/submit_script_pvserver.sh" delay="5">
+        <SSHConfig user="user">
+          <Terminal/>
+          <PortForwarding local="8080"/>
+        </SSHConfig>
+        <Arguments>
+          <Argument value="--reverse-connection"/>
+          <Argument value="--client-host=gateway"/>
+          <Argument value="--server-port=$PV_SERVER_PORT$"/>
+        </Arguments>
+      </SSHCommand>
+    </CommandStartup>
+  </Server>
+
+This is very similar to case sixteen, the main differences being the usage of the ``csrc`` ressource style for the reverse connection
+and the unspecified shell script that will run ``pvserver`` on a compute node, and, of course, the arguments to trigger the reverse connection
+on the ``pvserver``.
+
+Case Eighteen: Secured Reverse Connection from a HPC node trough SSH tunnel running on a gateway using random or user-specified port
+^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+Similarly to case seventeen, a reverse connection through a SSH tunnel would require to craft a command like this one:
+``ssh -R server_port:localhost:local_port user@gateway /path/to/submit_script_pvserver.sh --reverse-connection --client-host gateway --server-port server_port``
+
+However, it can be very useful to be able to generate random port in a dedicated range for both ``local_port`` and ``server_port`` or to let
+the user specify them. This is supported thanks to the option mechanism described in case eight.
+
+.. code-block:: xml
+
+  <Server name="case17" resource="csrc://gateway">
+    <CommandStartup>
+      <Options>
+        <Option name="PV_SERVER_PORT" label="Server Port" readonly="false">
+          <Range type="int" min="11111" max="65535" default="random" />
+        </Option>
+        <Option name="PV_SSH_PF_SERVER_PORT" label="Port forwarding Port" readonly="true">
+          <Range type="int" min="8000" max="8888" default="random" />
+        </Option>
+      </Options>
+      <SSHCommand exec="/path/to/submit_script_pvserver.sh" delay="5">
+        <SSHConfig user="user">
+          <Terminal/>
+          <PortForwarding/>
+        </SSHConfig>
+        <Arguments>
+          <Argument value="--reverse-connection"/>
+          <Argument value="--client-host=gateway"/>
+          <Argument value="--server-port=$PV_SERVER_PORT$"/>
+        </Arguments>
+      </SSHCommand>
+    </CommandStartup>
+  </Server>
+
+This is very similar to case seventeen, the main differences are that the server port and forwarding port are not set explicitly but instead
+we rely on the options mechanism to provide them through ``PV_SERVER_PORT`` and ``PV_SSH_PF_SERVER_PORT`` variables.
+
+.. admonition:: **Did you know?**
+   :class: tip
+
+   While SSH native support can simplify the configuration file,
+   some cases are still not covered and require complex custom command.
+   Client/DataServer/RenderServer SSH setup are not supported natively,
+   nested SSH tunnels are not supported natively either.
+   To create such setup, use of complex Command is needed.
+
+PVSC file XML Schema
+^^^^^^^^^^^^^^^^^^^^
+
+Here is the exhaustive PVSC file XML schema
+
+ * The ``<Servers>`` tag is the root element of the document, which contains zero-to-many ``<Server>`` tags.
+ * Each ``<Server>`` tag represents a configured server:
+
+  * The ``name`` attribute uniquely identifies the server configuration, and is displayed in the user interface.
+  * The ``timeout`` attribute specifies the maximum amount of time (in seconds) that the client will wait for the server to start, -1 means forever, default to 60.
+  * The ``resource`` attribute specifies the type of server connection, server host(s) and optional port(s) for making a connection. Values are
+
+   * ``cs://<host>:<port>`` - for client-pvserver configurations with forward connection i.e. client connects to the server. If not specified, port default to 11111.
+   * ``csrc://<host>:<port>`` - for client-pvserver configurations with reverse connection i.e. server connects to the client. If not specified, port default to 11111.
+   * ``cdsrs://<ds-host>:<ds-port>//<rs-host>:<rs-port>`` - for client-pvdataserver-pvrenderserver configurations with forward connection. If not specified, ds-port default to 11111, rs-port default to 22222.
+   * ``cdsrsrc://<ds-host>:<ds-port>//<rs-host>:<rs-port>`` - for client-pvdataserver-pvrenderserver configurations with reverse connection. If not specified, ds-port default to 11111, rs-port default to 22222.
+
+  * The ``<CommandStartup>`` tag is used to run an external command to start a server.
+
+   * An optional ``<Options>`` tag can be used to prompt the user for options required at startup.
+
+    * Each ``<Option>`` tag represents an option that the user will be prompted to modify before startup.
+
+     * The ``name`` attribute defines the name of the option, which will become its variable name when used as a run-time environment variable, and for purposes of string-substitution in ``<Argument>`` tags.
+     * The ``label`` attribute defines a human-readable label for the option, which will be used in the user interface.
+     * The optional ``readonly`` attribute can be used to designate options which are user-visible, but cannot be modified.
+     * The optional ``save`` attribute can be used to indicate that the value choosen by the user for this option will be saved in the ParaView settins so that it's preserved across ParaView sessions.
+     * A ``<Range>`` tag designates a numeric option that is only valid over a range of values.
+
+      * The ``type`` attribute controls the type of number controlled. Valid values are ``int`` for integers and ``double`` for floating-point numbers, respectively.
+      * The ``min`` and ``max`` attributes specify the minimum and maximum allowable values for the option (inclusive).
+      * The ``step`` attribute specifies the preferred amount to increment / decrement values in the user interface.
+      * The ``default`` attribute specifies the initial value of the option.
+
+       * As a special-case for integer ranges, a default value of ``random`` will generate a random number as the default each time the user is prompted for a value. This is particularly useful with ``PV_CONNECT_ID``, ``PV_SERVER_PORT`` and ``PV_SSH_PF_SERVER_PORT``.
+
+     * A ``<String>`` tag designates an option that accepts freeform text as its value.
+
+      * The ``default`` attribute specifies the initial value of the option.
+
+     * A ``<File>`` tag designates an option that accepts freeform text along with a file browse button to assist in choosing a filepath
+
+      * The ``default`` attribute specifies the initial value of the option.
+
+     * A ``<Boolean>`` tag designates an option that is either on/off or true/false.
+
+      * The ``true`` attribute specifies what the option value will be if enabled by the user.
+      * The ``false`` attribute specifies what the option value will be if disabled by the user.
+      * The ``default`` attribute specifies the initial value of the option, either ``true`` or ``false``.
+
+     * An ``<Enumeration>`` tag designates an option that can be one of a finite set of values.
+
+      * The ``default`` attribute specifies the initial value of the option, which must be one of its enumerated values.
+      * Each ``<Entry>`` tag describes one allowed value.
+
+       * The ``name`` tag specifies the value for that choice.
+       * The ``label`` tag provides human-readable text that will be displayed in the user interface for that choice.
+
+   * A ``<Command>`` tag is used to specify the external command and its startup arguments.
+
+    * The ``exec`` attribute specifies the filename of the command to be run. The system PATH will be used to search for the command, unless an absolute path is specified. If the value for this attribute is specified as $STRING$, then it will be replaced with the value of a predefined or user-defined (through <Option/>) variable.
+    * The ``process_wait`` attribute specifies a waiting time (in seconds) that ParaView will wait for the exec command to start. Default to 0.
+    * The ``delay`` attribute specifies a delay (in seconds) between the time the startup command completes and the time that the client attempts a connection to the server. Default to 0.
+    * ``<Argument>`` tags are command-line arguments that will be passed to the startup command.
+
+     * String substitution is performed on each argument, replacing each ``$STRING$`` with the value of a predefined or user-defined variable.
+     * Arguments whose value is an empty string are not passed to the startup command.
+
+   * A ``<SSHCommand>`` tag is used to specify the external command to be started through ssh
+
+    * All ``<Command>`` related attributes and tags still applies.
+    * A ``<SSHConfig>`` tag is used to set the SSH configuration.
+
+     * The ``user`` attribute is used to set the SSH username
+     * The ``port`` attribute is used to set the SSH port to use
+     * A ``<Terminal>`` tag is used to inform ParaView to use a terminal to issue ssh commands and ask user for password when needed.
+
+      * The ``exec`` attribute specifies the terminal executable to use, if not set, ParaView will try to find one automatically, on Windows and Linux only.
+      * The ``command option`` attribute specifies the option to use to pass the command to the terminal executable. ``-e`` by default.
+
+     * A ``<AskPass>`` tag, which should not be used with <Terminal> tag, can be used to inform ParaView to use a AskPass, using the SSH_ASKPASS environnement variable, on Linux only.
+     * A ``<SSH>`` tag, used to specify
+
+      * the ``exec`` attribute that specifies the SSH executable to use.
+
+     * A ``<PortForwarding>`` tag, that indicates to ParaView that a SSH tunnel will need to be created, either forward or reverse depending on the connection type.
+
+      * the ``local`` optional attribute that specified the local port to use the SSH tunel, and default to ``PV_SSH_PF_SERVER_PORT`` if defined, ``PV_SERVER_PORT`` otherwise.
+
+   * The ``<ManualStartup>`` tag indicates that the user will manually start the given server prior to connecting.
+
+    * An optional ``<Options>`` tag can be used to prompt the user for options required at startup. Note that ``PV_SERVER_PORT``, ``PV_DATA_SERVER_PORT``, ``PV_RENDER_SERVER_PORT``, ``PV_CONNECT_ID`` and ``PV_SSH_PF_SERVER_PORT`` variables will be taken into account in to server resource configuration when set here.
+
+Startup Command Variables
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+When a startup command is run, its environment will include all of the user-defined variables specified in <Option> tags, plus the following predefined variables:
+
+ * ``PV_CLIENT_HOST``
+ * ``PV_CONNECTION_URI``
+ * ``PV_CONNECTION_SCHEME``
+ * ``PV_VERSION_MAJOR`` (e.g. ``5``)
+ * ``PV_VERSION_MINOR`` (e.g. ``9``)
+ * ``PV_VERSION_PATCH`` (e.g. ``1``)
+ * ``PV_VERSION`` (e.g. ``5.9``)
+ * ``PV_VERSION_FULL`` (e.g. ``5.9.1``)
+ * ``PV_SERVER_HOST``
+ * ``PV_SERVER_PORT``
+ * ``PV_SSH_PF_SERVER_PORT``
+ * ``PV_DATA_SERVER_HOST``
+ * ``PV_DATA_SERVER_PORT``
+ * ``PV_RENDER_SERVER_HOST``
+ * ``PV_RENDER_SERVER_PORT``
+ * ``PV_CLIENT_PLATFORM`` (possible values are: ``Windows``, ``Apple``, ``Linux``, ``Unix``, ``Unknown``)
+ * ``PV_APPLICATION_DIR``
+ * ``PV_APPLICATION_NAME``
+ * ``PV_CONNECT_ID``
+
+These options can be used in the ``<Command>`` or ``<SSHCommand>`` elements part of the PVSC files,
+as well as extracted from the environnement when running the command.
+If an ``<Option>`` element defines a variable with the same name as a predefined variable, the ``<Option>`` element value takes precedence.
+This can be used to override defaults that are normally hidden from the user.
+As an example, if a site wants users to be able to override default port numbers, the server configuration might specify an <Option> of ``PV_SERVER_PORT``.
+
+Understanding parallel processing
+=================================
+
+Parallel processing, put simply, implies processing the data in parallel,
+simultaneously using multiple workers. Typically, these workers are different
+processes that could be running on a multicore machine or on several nodes of a
+cluster. Let's call these ranks. In most data processing and visualization
+algorithms, work is directly related to the amount of data that needs to be
+processed, i.e., the number of cells or points in the dataset. Thus, a straight-forward
+way of distributing the work among ranks is to split an input dataset
+into multiple chunks and then have each rank operate only an independent set of
+chunks. Conveniently, for most algorithms, the result obtained by splitting the
+dataset and processing it separately is same as the result that we'd get if we
+processed the dataset in a single chunk. There are, of course, exceptions. Let's
+try to understand this better with an example. For demonstration purposes,
+consider this very simplified mesh.
+
+.. figure:: ../images/ParallelExampleMesh.png
+    :width: 30%
+    :align: center
+
+Now, let us say we want to perform visualizations on this mesh using three
+processes.  We can divide the cells of the mesh as shown below with the
+blue, yellow, and pink regions.
+
+.. figure:: ../images/ParallelExamplePartitions.png
+    :width: 60%
+    :align: center
+
+Once partitioned, some visualization algorithms will work by simply
+allowing each process to independently run the algorithm on its local
+collection of cells.  Take clipping as an example.  Let's say that we
+define a clipping plane and give that same plane to each of the processes.
+
+.. figure:: ../images/ParallelExampleClip1.png
+    :width: 60%
+    :align: center
+
+Each process can independently clip its cells with this plane.  The end
+result is the same as if we had done the clipping serially.  If we were to
+bring the cells together (which we would never actually do for large data
+for obvious reasons), we would see that the clipping operation took place
+correctly.
+
+.. figure:: ../images/ParallelExampleClip2.png
+    :width: 60%
+    :align: center
+
+Ghost levels
+^^^^^^^^^^^^
+
+Unfortunately, blindly running visualization algorithms on partitions of
+cells does not always result in the correct answer.  As a simple example,
+consider the  **external faces**   algorithm.  The external faces
+algorithm finds all cell faces that belong to only one cell, thereby,
+identifying the boundaries of the mesh.
+
+.. figure:: ../images/ParallelExampleExternalFaces1.png
+   :width: 60%
+   :align: center
+
+Oops!  We see that when all the processes ran the external faces algorithm
+independently, many internal faces where incorrectly identified as being
+external.  This happens where a cell in one partition has a neighbor in
+another partition.  A process has no access to cells in other partitions,
+so there is no way of knowing that these neighboring cells exist.
+
+The solution employed by ParaView and other parallel visualization systems
+is to use  **ghost cells**  .  Ghost cells are cells that are held in
+one process but actually belong to another.  To use ghost cells, we first
+have to identify all the neighboring cells in each partition.  We then copy
+these neighboring cells to the partition and mark them as ghost cells, as
+indicated with the gray colored cells in the following example.
+
+.. figure:: ../images/ParallelExampleExternalFaces2.png
+   :width: 60%
+   :align: center
+
+When we run the external faces algorithm with the ghost cells, we see that
+we are still incorrectly identifying some internal faces as external.
+However, all of these misclassified faces are on ghost cells, and the faces
+inherit the ghost status of the cell from which it came.  ParaView then strips
+off the ghost faces, and we are left with the correct answer.
+
+In this example, we have shown one layer of ghost cells: only those cells
+that are direct neighbors of the partition's cells.  ParaView also has the
+ability to retrieve multiple layers of ghost cells, where each layer
+contains the neighbors of the previous layer not already contained in a
+lower ghost layer or in the original data itself.  This is useful when we have
+cascading filters that each require their own layer of ghost cells.  They
+each request an additional layer of ghost cells from upstream, and then
+remove a layer from the data before sending it downstream.
+
+Data partitioning
+^^^^^^^^^^^^^^^^^
+
+Since we are breaking up and distributing our data, it is prudent to
+address the ramifications of how we partition the data.  The data shown in
+the previous example has a  **spatially coherent**   partitioning.  That
+is, all the cells of each partition are located in a compact region of
+space.  There are other ways to partition data.  For example, you could
+have a random partitioning.
+
+.. figure:: ../images/ParallelExampleRandomPartition1.png
+   :width: 60%
+   :align: center
+
+Random partitioning has some nice features.  It is easy to create and is
+friendly to load balancing.  However, a serious problem exists with respect
+to ghost cells.
+
+.. figure:: ../images/ParallelExampleRandomPartition2.png
+   :width: 60%
+   :align: center
+
+In this example, we see that a single level of ghost cells nearly
+replicates the entire dataset on all processes.  We have thus removed any
+advantage we had with parallel processing.  Because ghost cells are used so
+frequently, random partitioning is not used in ParaView.
+
+D3 Filter
+^^^^^^^^^
+
+The previous section described the importance of load balancing and ghost
+levels for parallel visualization.  This section describes how to achieve
+that.
+
+Load balancing and ghost cells are handled automatically by ParaView when
+you are reading structured data (image data, rectilinear grid, and
+structured grid).  The implicit topology makes it easy to break the data
+into spatially coherent chunks and identify where neighboring cells are
+located.
+
+It is an entirely different matter when you are reading in unstructured
+data (poly data and unstructured grid).  There is no implicit topology and
+no neighborhood information available.  ParaView is at the mercy of how the
+data was written to disk.  Thus, when you read in unstructured data, there
+is no guarantee of how well-load balanced your data will be.  It is also
+unlikely that the data will have ghost cells available, which means that
+the output of some filters may be incorrect.
+
+Fortunately, ParaView has a filter that will both balance your unstructured
+data and create ghost cells.  This filter is called D3, which is short for
+distributed data decomposition.  Using D3 is easy; simply attach the filter
+(located in  :guilabel:`Filters > Alphabetical > D3`) to whatever
+data you wish to repartition.
+
+.. figure:: ../images/D3ExampleBefore.png
+   :width: 60%
+   :align: center
+
+.. figure:: ../images/D3ExampleAfter.png
+   :width: 60%
+   :align: center
+
+The most common use case for D3 is to attach it directly to your
+unstructured grid reader.  Regardless of how well-load balanced the incoming
+data might be, it is important to be able to retrieve ghost cell so that
+subsequent filters will generate the correct data.  The example above shows
+a cutaway of the extract surface filter on an unstructured grid.  On the
+left, we see that there are many faces improperly extracted because we are
+missing ghost cells.  On the right, the problem is fixed by first using the
+D3 filter.
+
+Ghost Cells Generation
+======================
+
+If your unstructured grid data is already partitioned satisfactorily but does
+not have ghost cells, it is possible to generate them using the ``Ghost Cells``
+filter. This filter can be attached to a source just like the ``D3`` filter.
+Unlike ``D3`` , it will not repartition the dataset, it will only generate
+ghost cells, which is needed for some algorithms to execute correctly.
+
+The ``Ghost Cells`` filter has several options. ``Build If Required``
+tells the filter to generate ghost cells only if required by a downstream filter.
+Since computing ghost cells is a computationally and communications intensive
+process, turning this option on can potentially save a lot of processing time.
+The ``Minimum Number Of Ghost Levels`` specifies at least how many ghost levels
+should be generated if ``Build If Required`` is off. Downstream filters may request
+more ghost levels than this minimum, in which case the ``Ghost Cells``
+will generate the requested number of ghost levels. The ``Use Global Ids`` option
+makes use of a GlobalIds array if it is present if on. If off, ghost cells are
+determined by coincident points.
+
+ParaView architecture
+=====================
+
+Before we see how to use ParaView for parallel data processing, let's take a
+closer look at the ParaView architecture. ParaView is designed as a three-tier
+client-server architecture.  The three logical units of ParaView are as follows.
+
+* **Data Server**    The unit responsible for data
+  reading, filtering, and writing.  All of the pipeline objects seen in the
+  pipeline browser are contained in the data server.  The data server can
+  be parallel.
+
+* **Render Server**   The unit responsible for
+  rendering.  The render server can also be parallel, in which case built-in
+  parallel rendering is also enabled.
+
+* **Client**   The unit responsible for establishing
+  visualization.  The client controls the object creation, execution, and
+  destruction in the servers, but does not contain any of the data (thus
+  allowing the servers to scale without bottlenecking on the client).  If
+  there is a GUI, that is also in the client.  The client is always a
+  serial application.
+
+These logical units need not by physically separated.  Logical units are
+often embedded in the same application, removing the need for any
+communication between them.  There are three modes in which you can run
+ParaView.
+
+.. figure:: ../images/RunModeStandalone.png
+   :width: 50%
+   :align: center
+
+The first mode, with which you are already familiar, is
+**standalone**   mode.  In standalone mode, the client, data server,
+and render server are all combined into a single serial application.  When
+you run the |paraview| application, you are automatically connected
+to a  **builtin**   server so that you are ready to use the full
+features of ParaView.
+
+.. figure:: ../images/RunModeClientServer.png
+    :width: 60%
+    :align: center
+
+The second mode is  **client-server**   mode.  In client-server mode,
+you execute the |pvserver| program on a parallel machine and
+connect to it with the |paraview| client application (or |pvpython|).  The
+|pvserver| program has both the data server and render server
+embedded in it, so both data processing and rendering take place there.
+The client and server are connected via a socket, which is assumed to be a
+relatively slow mode of communication, so data transfer over this socket is
+minimized. We saw this mode of operation in
+:numref:`sec:RemoteVisualization`.
+
+.. figure:: ../images/RunModeClientRenderDataServer.png
+   :width: 60%
+   :align: center
+
+The third mode is  **client-render server-data server**   mode.  In this
+mode, all three logical units are running in separate programs.  As before,
+the client is connected to the render server via a single socket
+connection.  The render server and data server are connected by many socket
+connections, one for each process in the render server.  Data transfer over
+the sockets is minimized.
+
+Although the client-render server-data server mode is supported, we almost
+never recommend using it.  The original intention of this mode is to take
+advantage of heterogeneous environments where one might have a large,
+powerful computational platform and a second smaller parallel machine with
+graphics hardware in it.  However, in practice, we find any benefit is
+almost always outstripped by the time it takes to move geometry from the
+data server to the render server.  If the computational platform is much
+bigger than the graphics cluster, then use software rendering on the large
+computational platform.  If the two platforms are about the same size, just
+perform all the computation on the graphics cluster. The executables used for
+this mode are |paraview| (or |pvpython|) (acting as the client), |pvdataserver| for
+the data-server, and |pvrenderserver| for the render-server.
+
+.. _sec:ParallelProcessingParaView:
+
+Parallel processing in ``paraview`` and ``pvpython``
+====================================================
+
+To leverage parallel processing capabilities in |paraview| or |pvpython|, one has
+to use remote visualization, i.e., one has to connect to a |pvserver|. The
+processing for connecting to this |pvserver| is not different from what we
+say in :numref:`sec:RemoteVisualization`
+and :numref:`sec:RemoteVisualizationPython`. The only thing that changes is how the
+|pvserver| is launched.
+
+You can start |pvserver| to run on more than one processing core
+using ``mpirun``
+.
+
+.. code-block:: shell
+
+  mpirun -np 4 pvserver
+
+This will run |pvserver| on four processing cores. It will still listen
+for an incoming connection from a client on the default port. The big
+difference when running |pvserver| this way is that when data is loaded
+from a source, it will be distributed across the four cores if the
+data source is ``parallel aware`` and supports distributing the data
+across the different processing cores.
+
+To see how this data is distributed, run |pvserver| as the command above and
+connect to it with |paraview|. Next, create another ``Sphere`` source
+using :guilabel:`Source > Sphere`. Change the array to color by to
+``vtkProcessId`` . You will see an image like Figure :numref:`fig:SphereColoredByProcessId`.
+
+.. figure:: ../images/SphereColoredByProcessId.png
+   :name: fig:SphereColoredByProcessId
+   :width: 80%
+   :align: center
+
+   Sphere source colored by ``vtkProcessId`` array that encodes
+   the processing core on which the sphere data resides. Here, the sphere
+   data is split among the four processing cores invoked by the
+   command ``mpirun -np 4 pvserver``.
+
+If a data reader or source is not ``parallel aware``, you can still get
+the benefits of spreading the data among processing cores by using the
+``D3`` filter. This filter partitions a dataset into convex regions
+and transfers each region to a different processing core. To see an
+example of how D3 partitions a dataset, create a :guilabel:`Source > Wavelet`
+while |paraview| is still connected to the |pvserver|. Next, select
+:guilabel:`Filters > Alphabetical > D3` and click ``Apply`` . The output of ``D3``
+will not initially appear different from the original wavelet source.
+If you color by ``vtkProcessId`` , however, you will see the four
+partitions that have been distributed to the server processing cores.
+
+.. figure:: ../images/WaveletColoredByProcessId.png
+    :name: fig:WaveletColoredByProcessId
+    :width: 80%
+    :align: center
+
+    Wavelet source processed by the D3 filter and colored by ``vtkProcessId``
+    array. Note how four regions of the image data are split evenly among the four
+    processing cores when |pvserver| is run with ``mpirun -np 4 pvserver`` .
+
+.. _sec:UsingPVBatch:
+
+Using ``pvbatch``
+=================
+
+In :numref:`sec:ParallelProcessingParaView`, we said that to use parallel
+processing capabilities, one has to use remote visualization, i.e., one must use
+ParaView in a client-server mode with the client (|paraview| or |pvpython|)
+connecting to a server (|pvserver|) that is being run in parallel using
+``mpirun``
+. However, there is one exception: |pvbatch|. |pvpython| and
+|pvbatch| are quite similar in that both are similarly to the ``python``
+
+executable that can be used to run Python scripts. The extra thing that these
+executables do when compared with the standard ``python`` is that they
+initialize the environment so that any scripts that you run will be able to
+locate the ParaView Python modules and libraries automatically. |pvpython| is
+exactly like the |paraview| executable without the GUI. You can think of it as
+the GUI from |paraview| is replaced by a Python interpreter in |pvpython|.
+|pvbatch|, on the other hand, can be thought of a |pvserver| where, instead of
+taking the control command from a remote client (|paraview| or |pvpython|), in
+|pvbatch|, the commands are taken from a Python script that is executed in the
+|pvbatch| executable itself. Since |pvbatch| is akin to the |pvserver|, unlike
+|pvpython|, it can be run in parallel using ``mpirun``
+. In that case,
+the root rank (or the first rank or the rank with index $0$) is the one that
+acts as the client, interpreting the Python script to execute the commands.
+Since |pvbatch| is designed to act is its own server, you cannot connect to a
+remote server in the Python script, i.e., you cannot use ``simple.Connect`` .
+Furthermore, |pvbatch| is designed for batch operation, which means that you can only
+specify the Python script as a command line argument. Unlike |pvpython|, you
+cannot run this executable to get an interactive shell to enter Python commands.
+
+.. code-block:: shell
+
+  # process the sample.py script in single process mode.
+  > pvbatch sample.py
+
+  # process the sample.py script in parallel.
+  > mpirun -np 4 pvbatch sample.py
+
+In general, you should use |pvpython| if you will be using the interpreter
+interactively and |pvbatch| if you are running in parallel.
+
+.. \begin{TODO}
+     Add discussion about symmetric batch mode. That can wait, however. Not super
+     critical.
+   \end{TODO}
+
+.. _sec:Fetch:
+
+Fetching data to the client
+===========================
+
+:numref:`sec:DataInformationInPython` describes how to obtain information
+*about* a data object, but not how to access the data object itself. This
+section describes several ways to access data from within a Python script. The
+client/server nature of ParaView requires a couple steps to access the raw data.
+The Python script runs on the client side in either |pvpython| or |paraview|, so
+one step involves moving the data from the server to the client. This can be
+accomplished with the following:
+
+.. code-block:: python
+
+  from paraview.simple import *
+  Connect("myhost")
+
+  # Create a sphere source on myhost
+  s = Sphere()
+  full_sphere = servermanager.Fetch(s)
+
+Here, the full dataset is moved from the server to the client.
+
+The second step is required to deal with the fact that data on the remote server
+may be split across distributed processes. By default,
+``servermanager.Fetch(s)`` appends all the pieces on the different remote
+processes and produces the appended dataset on the client. The exact
+append operation depends on the type of dataset being retrieved. Composite datasets
+are merged by treating the dataset piece on each distributed process as a block
+merged into a new multiblock dataset, polygonal datasets are appended into a single
+polygonal dataset, rectilinear grids are appended into a single rectilinear grid,
+and other datasets are appended into an unstructured grid. Distributed image
+datasets cannot currently be fetched to the client. Care must be taken when
+fetching an entire dataset to the client because the data that fits on many
+distributed processes on a remote system may not fit in client memory.
+
+Another option is to fetch just a single piece of the dataset on one remote
+process to the client. To do this, pass the rank number of the remote process from
+which you want to retrieve the data to the ``Fetch`` function, e.g.,
+
+.. code-block:: python
+
+  # Retrieve the piece of the dataset on remote process 2
+  s = Sphere()
+  sphere_piece = servermanager.Fetch(s, 2)
+
+Lastly, ``servermanager.Fetch`` provides a way to apply helper filters to the
+dataset that run at two stages. The filter for the first stage is applied to the
+data on each remote process, and the filter for the second stage is applied to the
+results from the first stage after they are gathered to the root server process.
+The results from the second stage of filtering are then transferred from the root
+server process to the client.
+
+In the next example, the ``Extract Surface`` filter is applied to a source with
+data on each process in the first stage. The results are then assembled with the
+``Append Geometry`` filter and sent to the client.
+
+.. code-block:: python
+
+  s = Sphere()
+  extract = servermanager.filters.ExtractSurface()
+  append = servermanager.filters.AppendGeometry()
+  full_surface = servermanager.Fetch(s, extract, append)
+
+The second filter must be able to accept multiple connections and handle the output
+dataset type from the first filter.
+
+.. _sec:Rendering:
+
+Rendering
+=========
+
+Rendering is the process of synthesizing the images that you see based on
+your data.  The ability to effectively interact with your data depends
+highly on the speed of the rendering.  Thanks to advances in 3D hardware
+acceleration, fueled by the computer gaming market, we have the ability to
+render 3D quickly even on moderately-priced computers.  But, of course, the
+speed of rendering is proportional to the amount of data being rendered.
+As data gets bigger, the rendering process naturally gets slower.
+
+.. %\index{rendering!interactive|see{interactive render}}
+   %\index{rendering!still|see{still render}}
+
+To ensure that your visualization session remains interactive, ParaView
+supports two modes of rendering that are automatically flipped as
+necessary.  In the first mode,  **still render**  , the data is rendered
+at the highest level of detail.  This rendering mode ensures that all of
+the data is represented accurately.  In the second mode,
+**interactive render**  , speed takes precedence over accuracy.  This
+rendering mode endeavors to provide a quick rendering rate regardless of
+data size.
+
+While you are interacting with a 3D view (for example, rotating, panning, or
+zooming with the mouse), ParaView uses an interactive render.  This is
+because, during the interaction, a high frame rate is necessary to make these
+features usable and because each frame is immediately replaced with a new
+rendering while the interaction is occurring so that fine details are less
+important during this mode.  At any time when interaction of the 3D view is
+not taking place, ParaView uses a still render so that the full detail of
+the data is available as you study it.  As you drag your mouse in a 3D view
+to move the data, you may see an approximate rendering.
+The full detail will be presented as soon as you release the
+mouse button.
+
+The interactive render is a compromise between speed and accuracy.  As
+such, many of the rendering parameters concern when and how lower levels of
+detail are used.
+
+.. _sec:BasicRenderingSettings:
+
+Basic Rendering Settings
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+Some of the most important rendering options are the LOD parameters.
+During interactive rendering, the geometry may be replaced with a lower
+**level of detail**   ( **LOD**  ), an approximate geometry with
+fewer polygons.
+
+|LODFULL| |LOD50| |LOD10|
+
+.. |LODFULL| image:: ../images/GeometricLODFull.png
+    :width: 30%
+
+.. |LOD50| image:: ../images/GeometricLOD50.png
+    :width: 30%
+
+.. |LOD10| image:: ../images/GeometricLOD10.png
+    :width: 30%
+
+The resolution of the geometric approximation can be controlled. In the
+proceeding images, the left image is the full resolution, the middle image
+is the default decimation for interactive rendering, and the right image is
+ParaView's maximum decimation setting.
+
+The 3D rendering parameters are located in the settings dialog box, which is
+accessed in the menu from the :guilabel:`Edit > Settings` menu
+(:guilabel:`ParaView > Preferences` on the Mac).  The rendering options in the dialog
+are in the ``Render View`` tab.
+
+.. figure:: ../images/SettingsRendering.png
+    :width: 80%
+    :align: center
+
+The options pertaining to the geometric decimation for interactive
+rendering are located in a section labeled ``Interactive Rendering Options`` .
+Some of these options are considered advanced, so to access
+them, you have to either toggle on the advanced options with the
+|pqAdvanced| button or search for the option using the edit box at
+the top of the dialog. The interactive rendering options include the
+following.
+
+* ``LOD Threshold`` : Set the data size at which to use a decimated
+  geometry in interactive rendering. If the geometry size is under this
+  threshold, ParaView always renders the full geometry. Increase this value
+  if you have a decent graphics card that can handle larger data. Try
+  decreasing this value if your interactive renders are too slow.
+* ``LOD Resolution`` : Set the factor that controls how large the
+  decimated geometry should be. This control is set to a value between 0
+  and 1. 0 produces a very small number of triangles but, possibly, with a
+  lot of distortion. 1 produces more detailed surfaces but with larger
+  geometry. |pqAdvanced|
+* ``Non Interactive Render Delay`` : Add a delay between an interactive
+  render and a still render. ParaView usually performs a still render
+  immediately after an interactive motion is finished (for example,
+  releasing the mouse button after a rotation). This option can add a delay
+  that can give you time to start a second interaction before the still
+  render starts, which is helpful if the still render takes a long time to
+  complete. |pqAdvanced|
+* ``Use Outline For LOD Rendering`` : Use an outline in place of
+  decimated geometry. The outline is an alternative for when the geometry
+  decimation takes too long or still produces too much geometry. However, it
+  is more difficult to interact with just an outline.
+
+ParaView contains many more rendering settings. Here is a summary of some
+other settings that can effect the rendering performance regardless of
+whether ParaView is run in client-server mode or not. These options are
+spread among several categories, and several are considered advanced.
+
+* ``Translucent Rendering Options``
+    * ``Depth Peeling`` : Enable or disable depth peeling. Depth
+      peeling is a technique ParaView uses to properly render translucent
+      surfaces. With it, the top surface is rendered and then "peeled away"
+      so that the next lower surface can be rendered and so on.  If you find
+      that making surfaces transparent really slows things down or renders
+      completely incorrectly, then your graphics hardware may not be
+      implementing the depth peeling extensions well; try shutting off depth
+      peeling. |pqAdvanced|
+
+    * ``Depth Peeling for Volumes`` : Include volumes in depth peeling to
+      correctly intermix volumes and translucent polygons.
+
+    * ``Maximum Number Of Peels`` : Set the maximum number of peels to use with depth peeling. Using
+      more peels allows more depth complexity, but allowing less peels runs
+      faster. You can try adjusting this parameter if translucent geometry
+      renders too slow or translucent images do not look correct. |pqAdvanced|
+* ``Miscellaneous``
+    * ``Outline Threshold`` : When creating very large datasets, default to the outline
+      representation. Surface representations usually require ParaView to
+      extract geometry of the surface, which takes time and memory. For data
+      with sizes above this threshold, use the outline representation, which
+      has very little overhead, by default instead.
+
+    * ``Show Annotation`` : Show or hide annotation providing
+      rendering performance information. This information is handy when
+      diagnosing performance problems. |pqAdvanced|
+
+Note that this is not a complete list of ParaView rendering settings. We
+have left out settings that do not significantly affect rendering
+performance. We have also left out settings that are only valid for
+parallel client-server rendering, which are discussed in
+:numref:`sec:ParallelRenderParameters`.
+
+Basic Parallel Rendering
+^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. %\index{rendering!parallel|(}
+
+When performing parallel visualization, we are careful to ensure that the
+data remains partitioned among all of the processes up to and including
+the rendering processes.  ParaView uses a parallel rendering library called
+**IceT**  .  IceT uses a  **sort-last**   algorithm for parallel
+rendering.  This parallel rendering algorithm has each process
+independently render its partition of the geometry and then
+**composites**   the partial images together to form the final image.
+
+.. figure:: ../images/ParallelRendering.png
+    :width: 80%
+    :align: center
+
+The preceding diagram is an oversimplification.  IceT contains multiple
+parallel image compositing algorithms such as  **binary tree**  ,
+**binary swap**  , and  **radix-k**   that efficiently divide work
+among processes using multiple phases.
+
+.. figure:: ../images/ParallelRenderingDetail.png
+    :width: 80%
+    :align: center
+
+The wonderful thing about sort-last parallel rendering is that its
+efficiency is completely insensitive to the amount of data being rendered.
+This makes it a very scalable algorithm and well suited to large data.
+However, the parallel rendering overhead does increase linearly with the
+number of pixels in the image.  Consequently, some of the rendering
+parameters deal with the image size.
+
+.. figure:: ../images/ParallelRenderingTiles.png
+    :width: 80%
+    :align: center
+
+IceT also has the ability to drive tiled displays, which are large, high-resolution
+displays comprising an array of monitors or projectors.  Using a sort-last
+algorithm on a tiled display is a bit counterintuitive because the number
+of pixels to composite is so large.  However, IceT is designed to take
+advantage of spatial locality in the data on each process to drastically
+reduce the amount of compositing necessary.  This spatial locality can be
+enforced by applying the :guilabel:`Filters > Alphabetical > D3`
+filter to your data.
+
+Because there is an overhead associated with parallel rendering, ParaView
+has the ability to turn off parallel rendering at any time.  When parallel
+rendering is turned off, the geometry is shipped to the location where
+display occurs.  Obviously, this should only happen when the data being
+rendered is small.
+
+Image Level of Detail
+^^^^^^^^^^^^^^^^^^^^^
+
+The overhead incurred by the parallel rendering algorithms is proportional
+to the size of the images being generated.  Also, images generated on a
+server must be transfered to the client, a cost that is also proportional
+to the image size.  To help increase the frame rate during interaction,
+ParaView introduces a new LOD parameter that controls the size of the
+images.
+
+During interaction while parallel rendering, ParaView can optionally
+**subsample**   the image.  That is, ParaView will reduce the
+resolution of the image in each dimension by a factor during interaction.
+Reduced images will be rendered, composited, and transfered.  On the
+client, the image is inflated to the size of the available space in the
+GUI.
+
+.. |ImageLODFull| image:: ../images/ImageLODFull.png
+                  :width: 24%
+
+.. |ImageLOD2| image:: ../images/ImageLOD2.png
+               :width: 24%
+
+.. |ImageLOD4| image:: ../images/ImageLOD4.png
+               :width: 24%
+
+.. |ImageLOD8| image:: ../images/ImageLOD8.png
+               :width: 24%
+
+|ImageLODFull| |ImageLOD2| |ImageLOD4| |ImageLOD8|
+
+The resolution of the reduced images is controlled by the factor with which
+the dimensions are divided.  In the proceeding images, the left image has
+the full resolution.  The following images were rendered with the
+resolution reduced by a factor of 2, 4, and 8, respectively.
+
+ParaView also has the ability to compress images before transferring them
+from server to client. Compression, of course, reduces the amount of data
+transferred and, therefore, makes the most of the available bandwidth.
+However, the time it takes to compress and decompress the images adds to
+the latency.
+
+ParaView contains several different image compression algorithms for
+client-server rendering. The first uses LZ4 compression that is designed
+for high-speed compression and decompression. The second
+option is a custom algorithm called
+**Squirt**  , which stands for Sequential Unified Image Run Transfer.
+Squirt is a run-length encoding compression that reduces color depth to
+increase run lengths. The third algorithm uses the  **Zlib**
+compression library, which implements a variation of the Lempel-Ziv
+algorithm. Zlib typically provides better compression than Squirt, but
+it takes longer to perform and, hence, adds to the latency. |paraview| Windows
+and Linux executables include a compression option that uses NVIDIA's
+NVPipe library for hardware-accelerated compression and decompression if
+a Kepler-class or higher NVIDIA GPU is available.
+
+.. _sec:ParallelRenderParameters:
+
+Parallel Render Parameters
+^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+.. figure:: ../images/SettingsServer.png
+    :width: 60%
+    :align: center
+
+Like the other 3D rendering parameters, the parallel rendering parameters
+are located in the ``Settings`` dialog.
+The parallel rendering options in the dialog are in the
+``Render View`` tab (intermixed with several other rendering options such as those
+described in  :numref:`sec:BasicRenderingSettings`). The parallel and
+client-server options are divided among several categories, and several are
+considered advanced.
+
+* ``Remote/Parallel Rendering Options``
+
+  * ``Remote Render Threshold`` : Set the data size at which to
+    render remotely in parallel or to render locally. If the geometry is
+    over this threshold (and ParaView is connected to a remote server), the
+    data is rendered in parallel remotely, and images are sent back to the
+    client. If the geometry is under this threshold, the geometry is sent
+    back to the client, and images are rendered locally on the client.
+  * ``Still Render Image Reduction Factor`` :
+    Set the sub-sampling factor for still (non-interactive) rendering.
+    Some large displays have more resolution than is really necessary, so
+    this sub-sampling reduces the resolution of all images displayed.
+    |pqAdvanced|
+
+* ``Client/Server Rendering Options``
+
+  * ``Image Reduction Factor`` : Set the
+    interactive subsampling factor. The overhead of parallel rendering is
+    proportional to the size of the images generated.  Thus, you can speed
+    up interactive rendering by specifying an image subsampling rate.  When
+    this box is checked, interactive renders will create smaller images,
+    which are then magnified when displayed.  This parameter is only used
+    during interactive renders. |pqAdvanced|
+
+* ``Image Compression``
+
+  * Before images are shipped from server to client, they can optionally
+    be compressed using one of three available compression algorithms:
+    LZ4  , Squirt  , or Zlib  . To make the
+    compression more effective, either algorithm can reduce the color resolution
+    of the image before compression. The sliders determine the amount of color
+    bits saved. Full color resolution is always used during a still
+    render. |pqAdvanced|
+  * Suggested image compression presets are provided for several common
+    network types. When attempting to select the best image compression
+    options, try starting with the presets that best match your connection.
+    |pqAdvanced|
+
+.. %\index{rendering!parallel|)}
+
+Parameters for Large Data
+^^^^^^^^^^^^^^^^^^^^^^^^^
+
+The default rendering parameters are suitable for most users.  However,
+when dealing with very large data, it can help to tweak the rendering
+parameters.  While the optimal parameters depend on your data and the hardware
+on which ParaView is running, here are several pieces of advice that you
+should follow.
+
+* If there is a long pause before the first interactive render of a
+  particular dataset, it might be the creation of the decimated
+  geometry. Try using an outline instead of decimated geometry for
+  interaction. You could also try lowering the factor of the decimation to
+  0 to create smaller geometry.
+* Avoid shipping large geometry back to the client. The remote
+  rendering will use the power of the entire server to render and ship images
+  to the client.  If remote rendering is off, geometry is shipped back to
+  the client.  When you have large data, it is always faster to ship images
+  than to ship data. (Although, if your network has a high latency, this
+  could become problematic for interactive frame rates.)
+* Adjust the interactive image sub-sampling for client-server rendering
+  as needed.  If image compositing is slow, if the connection between
+  client and server has low bandwidth, or if you are rendering very large
+  images, then a higher subsample rate can greatly improve your interactive
+  rendering performance.
+* Make sure ``Image Compression`` is on.  It has a tremendous effect
+  on desktop delivery performance, and the artifacts it introduces, which
+  are only there during interactive rendering, are minimal.  Lower
+  bandwidth connections can try using Zlib instead of Squirt compression.
+  Zlib will create smaller images at the cost of longer
+  compression/decompression times.
+* If the network connection has a high latency, adjust the parameters
+  to avoid remote rendering during interaction. In this case, you can try
+  turning up the remote rendering threshold a bit, and this is a place
+  where using the outline for interactive rendering is effective.
+* If the still (non-interactive) render is slow, try turning on the
+  delay between interactive and still rendering to avoid unnecessary
+  renders.
+
+.. |pqAdvanced| image:: ../images/icons/pqAdvanced.svg
+   :width: 20px
+
+.. |pqConnect| image:: ../images/icons/pqConnect.svg
+   :width: 20px
+
+.. |pqServer| image:: ../images/icons/pqServer16@2x.png
+   :height: 20px
