@@ -99,22 +99,11 @@ ENV CMAKE_PREFIX_PATH="/workspace/deps"
 ENV CCACHE_DIR="/workspace/.ccache"
 ENV NVIDIA_VISIBLE_DEVICES="all"
 ENV NVIDIA_DRIVER_CAPABILITIES="compute,utility,graphics"
-# These environment variables point to directories created by the volume setup
-# The actual directories are created during volume initialization, not here
-ENV XDG_DATA_HOME="/workspace/deps/runtime/xdg/data"
-ENV XDG_CONFIG_HOME="/workspace/deps/runtime/xdg/config"
-ENV XDG_STATE_HOME="/workspace/deps/runtime/xdg/state"
-ENV XDG_CACHE_HOME="/workspace/deps/runtime/xdg/cache"
-ENV VSCODE_AGENT_FOLDER="/workspace/deps/runtime/vscode-server"
-ENV CURSOR_AGENT_FOLDER="/workspace/deps/runtime/cursor-server"
-ENV NPM_CONFIG_CACHE="/workspace/deps/runtime/npm-cache"
-ENV PIP_CACHE_DIR="/workspace/deps/runtime/pip-cache"
-ENV YARN_CACHE_FOLDER="/workspace/deps/runtime/yarn-cache"
 # Set hostname for prompt
 ENV HOSTNAME="coral~machine"
 # Control which startup script to use (set to "runpod" for RunPod deployment)
 ENV STARTUP_MODE="default"
- # Ensure Tini reaps zombies even if not PID 1 (RunPod may wrap entrypoint)
+# Ensure Tini reaps zombies even if not PID 1 (RunPod may wrap entrypoint)
 ENV TINI_SUBREAPER=1
 
 # Configure package managers to use volume-based directories
@@ -139,6 +128,53 @@ RUN echo '[ -f /workspace/deps/env.sh ] && source /workspace/deps/env.sh' >> /ro
     && echo '[ -f /etc/motd ] && cat /etc/motd' >> /root/.bashrc \
     && echo '[ -f /etc/motd ] && cat /etc/motd' >> /root/.zshrc \
     && chsh -s /usr/bin/zsh root
+
+# Create user 1001 for Cursor/VS Code server compatibility
+# This user is only needed for tar extraction ownership - not for login
+RUN groupadd -g 1001 vscode && \
+    useradd -u 1001 -g 1001 -m -s /bin/bash vscode
+
+# Create tar wrapper to fix Cursor/VS Code server installation ownership issues
+# This wrapper adds --no-same-owner flag for extract operations
+RUN cat > /usr/local/bin/tar << 'EOF'
+#!/bin/bash
+# Tar wrapper to avoid ownership changes on extract operations.
+# Adds --no-same-owner when extracting, fixing Remote-SSH server installs.
+
+set -euo pipefail
+
+extract=false
+owner_flag_present=false
+
+for arg in "$@"; do
+    case "$arg" in
+        --extract|--get)
+            extract=true
+            ;;
+        --no-same-owner|--same-owner|--owner=*|--group=*)
+            owner_flag_present=true
+            ;;
+        -*)
+            # Combined short options like -xzf, -xf, etc.
+            if [[ "$arg" == *x* ]]; then
+                extract=true
+            fi
+            ;;
+    esac
+done
+
+if $extract; then
+    if $owner_flag_present; then
+        exec /usr/bin/tar "$@"
+    else
+        exec /usr/bin/tar --no-same-owner "$@"
+    fi
+else
+    exec /usr/bin/tar "$@"
+fi
+EOF
+
+RUN chmod +x /usr/local/bin/tar
 
 # Create MOTD (Message of the Day) for terminal sessions
 RUN echo 'O RADIANT MUSES ~ MAKE ME YOUR INSTRUMENT' >> /etc/motd && \

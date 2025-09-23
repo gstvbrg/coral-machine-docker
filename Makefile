@@ -131,3 +131,38 @@ down:
 # Start from scratch
 reset: clean setup dev
 	@echo "Full reset complete!"
+
+# # Stop all containers
+# stop:
+# 	docker-compose down
+
+# # Remove containers but keep volumes
+# down:
+# 	docker-compose down
+
+# # Start from scratch
+# reset: clean setup dev
+# 	@echo "Full reset complete!"
+
+# # Runtime image config
+# IMAGE_NAME ?= gstvbrg/coral-machine-runtime
+# TAG ?= latest
+# RUNTIME_DOCKERFILE ?= docker/Dockerfile.runtime
+
+# .PHONY: runtime-build runtime-push runtime-buildx-push runtime-login
+
+# # Build runtime image (no cache)
+# runtime-build:
+# 	docker build --no-cache -f $(RUNTIME_DOCKERFILE) -t $(IMAGE_NAME):$(TAG) .
+
+# # Push runtime image (assumes you're logged in)
+# runtime-push:
+# 	docker push $(IMAGE_NAME):$(TAG)
+
+# # Build and push in one step using Buildx
+# runtime-buildx-push:
+# 	docker buildx build --no-cache -f $(RUNTIME_DOCKERFILE) -t $(IMAGE_NAME):$(TAG) --push .
+
+# # Optional: quick login
+# runtime-login:
+# 	docker login -u $(DOCKER_USER)

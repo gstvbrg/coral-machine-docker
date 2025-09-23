@@ -1,7 +1,12 @@
 #!/bin/bash
-# Final startup script for RunPod with persistent scripts integration
+# Startup script for RunPod with persistent script integration
 
 set -e
+
+# Set locale for UTF-8 encoding
+export LC_ALL=C.UTF-8
+export LANG=C.UTF-8
+export LANGUAGE=en_US:en
 
 # Logging helpers
 log_info() { echo "[INFO] $*"; }
@@ -65,41 +70,37 @@ else
 fi
 
 
-# Persist Cursor/VSCode servers and XDG dirs by symlinking into the volume
+# Unified persistence for Cursor/VSCode and their ecosystem dependencies
 PERSIST_ROOT="/workspace/deps/runtime"
-mkdir -p "$PERSIST_ROOT/cursor-server" \
-         "$PERSIST_ROOT/cursor-home" \
-         "$PERSIST_ROOT/vscode-server" \
-         "$PERSIST_ROOT/xdg/data" \
-         "$PERSIST_ROOT/xdg/config" \
-         "$PERSIST_ROOT/xdg/state" \
-         "$PERSIST_ROOT/xdg/cache" \
-         "$PERSIST_ROOT/npm-cache" \
-         "$PERSIST_ROOT/pip-cache" \
-         "$PERSIST_ROOT/yarn-cache"
 
-# Helper to replace a path with a symlink to persistent target
-persist_link() {
-    local src_path="$1"
-    local dst_path="$2"
-    local parent_dir
-    parent_dir="$(dirname "$src_path")"
-    mkdir -p "$parent_dir" 2>/dev/null || true
-    if [ -L "$src_path" ]; then
-        return 0
-    fi
-    if [ -d "$src_path" ] || [ -f "$src_path" ]; then
-        rm -rf "$src_path"
-    fi
-    ln -s "$dst_path" "$src_path" || log_warn "Failed to link $src_path -> $dst_path"
-}
+# Create persistent directories (apps will create subdirs as needed)
+mkdir -p "$PERSIST_ROOT"/{cursor-server,vscode-server,cursor-home}
+mkdir -p "$PERSIST_ROOT"/{config,data,state,cache}
+mkdir -p "$PERSIST_ROOT"/{npm,pip,yarn}
+mkdir -p "$PERSIST_ROOT"/{npm-global,pip-user}
 
-# Cursor server home and agent cache
-persist_link "/root/.cursor-server" "$PERSIST_ROOT/cursor-server"
-persist_link "/root/.cursor" "$PERSIST_ROOT/cursor-home"
+# Ensure parent directories exist
+mkdir -p /root/.local /root/.cache
 
-# VSCode remote server (Cursor uses similar paths)
-persist_link "/root/.vscode-server" "$PERSIST_ROOT/vscode-server"
+# Safe symlink approach - atomic operations
+# Cursor/VSCode servers
+ln -sfn "$PERSIST_ROOT/cursor-server" /root/.cursor-server
+ln -sfn "$PERSIST_ROOT/vscode-server" /root/.vscode-server
+ln -sfn "$PERSIST_ROOT/cursor-home" /root/.cursor
+
+# XDG directories (essential for extension state)
+ln -sfn "$PERSIST_ROOT/config" /root/.config
+ln -sfn "$PERSIST_ROOT/data" /root/.local/share
+ln -sfn "$PERSIST_ROOT/state" /root/.local/state
+ln -sfn "$PERSIST_ROOT/cache" /root/.cache
+
+# Package manager caches (used by extensions)
+ln -sfn "$PERSIST_ROOT/npm" /root/.npm
+ln -sfn "$PERSIST_ROOT/pip" /root/.cache/pip
+ln -sfn "$PERSIST_ROOT/yarn" /root/.yarn
+
+log_info "Unified persistence: Cursor/VSCode + XDG + package caches → persistent volume"
+
 
 # Check if Cursor server is persisted
 if [ "$(ls -A "$PERSIST_ROOT/cursor-server")" ]; then
@@ -108,27 +109,9 @@ else
     log_info "Cursor server will be installed to persistent volume on first connect"
 fi
 
-# Proactively clean up any stale Cursor processes/tokens from previous sessions
-# This avoids reusing unhealthy multiplex/code servers that can delay reconnection
-if pgrep -f 'cursor-remote|cursor-server' >/dev/null 2>&1; then
-    log_info "Stopping stale Cursor processes (cursor-remote/cursor-server)"
-    pkill -f 'cursor-remote|cursor-server' >/dev/null 2>&1 || true
-fi
+# Clean up old temporary files
 rm -f /tmp/cursor-remote-*.token.* /tmp/cursor-remote-*.log.* >/dev/null 2>&1 || true
 
-# XDG base directories
-# Ensure parent directories exist for XDG symlinks
-mkdir -p /root/.local
-
-persist_link "/root/.local/share" "$PERSIST_ROOT/xdg/data"
-persist_link "/root/.config" "$PERSIST_ROOT/xdg/config"
-persist_link "/root/.local/state" "$PERSIST_ROOT/xdg/state"
-persist_link "/root/.cache" "$PERSIST_ROOT/xdg/cache"
-
-# Common language/tool caches
-persist_link "/root/.npm" "$PERSIST_ROOT/npm-cache"
-persist_link "/root/.cache/pip" "$PERSIST_ROOT/pip-cache"
-persist_link "/root/.yarn" "$PERSIST_ROOT/yarn-cache"
 
 # Setup persistent aliases
 if [ -f "/workspace/deps/scripts/setup-aliases.sh" ]; then
@@ -155,18 +138,18 @@ if ! pgrep -x sshd > /dev/null; then
     mkdir -p /workspace/.ssh /etc/ssh
     chmod 700 /workspace/.ssh 2>/dev/null || true
 
-    # Link persistent SSH host keys from volume if they exist
+    # Copy persistent SSH host keys from volume if they exist
     if [ -f /workspace/.ssh/ssh_host_ed25519_key ]; then
-        # Use symlinks to persistent keys (created during volume setup)
+        # Copy keys instead of symlink for SSHD compatibility
         for key_type in rsa ed25519 ecdsa; do
-            if [ -f "/workspace/.ssh/ssh_host_${key_type}_key" ]; then
-                ln -sf "/workspace/.ssh/ssh_host_${key_type}_key" "/etc/ssh/ssh_host_${key_type}_key"
-                ln -sf "/workspace/.ssh/ssh_host_${key_type}_key.pub" "/etc/ssh/ssh_host_${key_type}_key.pub"
-                chmod 600 "/etc/ssh/ssh_host_${key_type}_key" 2>/dev/null || true
-                chmod 644 "/etc/ssh/ssh_host_${key_type}_key.pub" 2>/dev/null || true
+            if [ -f "/workspace/.ssh/ssh_host_${key_type}_key" ] && [ -f "/workspace/.ssh/ssh_host_${key_type}_key.pub" ]; then
+                cp "/workspace/.ssh/ssh_host_${key_type}_key" "/etc/ssh/ssh_host_${key_type}_key"
+                cp "/workspace/.ssh/ssh_host_${key_type}_key.pub" "/etc/ssh/ssh_host_${key_type}_key.pub"
+                chmod 600 "/etc/ssh/ssh_host_${key_type}_key"
+                chmod 644 "/etc/ssh/ssh_host_${key_type}_key.pub"
             fi
         done
-        log_ssh "Using persistent host keys from /workspace/.ssh/"
+        log_ssh "Copied persistent host keys from /workspace/.ssh/ to /etc/ssh/"
     else
         # Generate temporary keys if volume setup hasn't run yet
         log_warn "No persistent SSH host keys found - generating temporary keys"
@@ -221,56 +204,125 @@ EOF
             log_error "SSH failed to start. Check: tail -20 /tmp/sshd_error.log"
         fi
     else
-        if echo "$PRE_ERR" | grep -qi 'permission'; then
-            log_warn "SSHD preflight failed due to permission issues; copying host keys into /etc/ssh"
-        else
-            log_warn "SSHD preflight failed; copying host keys (reason: $(echo "$PRE_ERR" | head -n1))"
-        fi
-        for key_type in rsa ed25519 ecdsa; do
-            if [ -f "/workspace/.ssh/ssh_host_${key_type}_key" ] && [ -f "/workspace/.ssh/ssh_host_${key_type}_key.pub" ]; then
-                install -m 600 -p "/workspace/.ssh/ssh_host_${key_type}_key"     "/etc/ssh/ssh_host_${key_type}_key"
-                install -m 644 -p "/workspace/.ssh/ssh_host_${key_type}_key.pub" "/etc/ssh/ssh_host_${key_type}_key.pub"
-            fi
-        done
-
-        if /usr/sbin/sshd -t -f /tmp/sshd_config 2>/tmp/sshd_error.log && /usr/sbin/sshd -f /tmp/sshd_config 2>/tmp/sshd_error.log; then
-            log_ssh "Listening on ports 22 and 2222 (copied host keys)"
-        else
-            log_error "SSH failed to start. Check: tail -20 /tmp/sshd_error.log"
-        fi
+        log_error "SSHD configuration validation failed: $(echo "$PRE_ERR" | head -n1)"
+        log_error "SSH setup cannot continue. Check: tail -20 /tmp/sshd_error.log"
+        log_error "Host keys are symlinked - this may be a permission or system issue"
     fi
 else
     log_ssh "Already running (ports 22 and 2222)"
 fi
 
+# Tailscale helper functions
+validate_auth_key() {
+    local key="$1"
+    [ -n "$key" ] && echo "$key" | grep -Eq '^tskey-(auth|tag)-[A-Za-z0-9_-]+$'
+}
+
+sanitize_auth_key() {
+    printf %s "$1" | tr -d '\r\n' | sed -E 's/^[[:space:]]+|[[:space:]]+$//g; s/^"//; s/"$//'
+}
+
+get_backend_state() {
+    if command -v jq >/dev/null 2>&1; then
+        timeout 5 tailscale status --json 2>/dev/null | jq -r '.BackendState // "unknown"'
+    else
+        if timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
+            echo "Running"
+        elif timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"NeedsLogin"'; then
+            echo "NeedsLogin"
+        else
+            echo "unknown"
+        fi
+    fi
+}
+
+start_tailscale_daemon() {
+    local ts_dir="$1"
+    local mode="$2"
+
+    if [ "$mode" = "userspace" ]; then
+        nohup tailscaled --tun=userspace-networking --state="$ts_dir/tailscaled.state" \
+            --socket=/run/tailscale/tailscaled.sock >> "$ts_dir/tailscaled.log" 2>&1 &
+    else
+        nohup tailscaled --state="$ts_dir/tailscaled.state" \
+            --socket=/run/tailscale/tailscaled.sock >> "$ts_dir/tailscaled.log" 2>&1 &
+    fi
+}
+
+cleanup_tailscale_state() {
+    local ts_dir="$1"
+    local force_reset="${TAILSCALE_FORCE_STATE_RESET:-false}"
+
+    # Kill stalled daemon
+    if pgrep -x tailscaled >/dev/null; then
+        pkill -9 tailscaled 2>/dev/null || true
+        sleep 1
+        log_ts "Killed stalled daemon process"
+    fi
+
+    # Clean state based on reset policy
+    if [ "$force_reset" = "true" ]; then
+        rm -f "$ts_dir/tailscaled.state" "$ts_dir/tailscaled.state.tmp" "$ts_dir"/*.lock
+        rm -f /run/tailscale/tailscaled.sock
+        log_ts "Removed stale state files (forced reset enabled)"
+    else
+        rm -f /run/tailscale/tailscaled.sock "$ts_dir"/*.lock 2>/dev/null || true
+        log_ts "Preserved tailscaled.state; only cleaned locks/socket"
+    fi
+}
+
 # Tailscale Setup
 if command -v tailscaled >/dev/null 2>&1; then
     TS_DIR="/workspace/deps/runtime/tailscale"
     mkdir -p "$TS_DIR" /run/tailscale
-    TS_AUTHKEY="${TAILSCALE_AUTHKEY:-}"
-    [ -n "$TS_AUTHKEY" ] || { [ -f "$TS_DIR/authkey" ] && TS_AUTHKEY="$(head -n1 "$TS_DIR/authkey" | tr -d ' \r\n')"; }
-    TS_HOSTNAME="${TAILSCALE_HOSTNAME:-coral-machine}"
-    
-    # Detect auth source
-    AUTH_SOURCE="none"
-    [ -n "${TAILSCALE_AUTHKEY:-}" ] && AUTH_SOURCE="env"
-    [ -f "$TS_DIR/authkey" ] && [ -z "${TAILSCALE_AUTHKEY:-}" ] && AUTH_SOURCE="file"
 
-    # Start tailscaled with appropriate mode
-    TS_MODE="kernel"
-    if [ -e /dev/net/tun ]; then
-        nohup tailscaled --state="$TS_DIR/tailscaled.state" \
-            --socket=/run/tailscale/tailscaled.sock >> "$TS_DIR/tailscaled.log" 2>&1 &
-    else
-        TS_MODE="userspace"
-        nohup tailscaled --tun=userspace-networking --state="$TS_DIR/tailscaled.state" \
-            --socket=/run/tailscale/tailscaled.sock >> "$TS_DIR/tailscaled.log" 2>&1 &
+    # Get and validate auth key (env takes precedence)
+    TS_AUTHKEY=""
+    AUTH_SOURCE="none"
+
+    if [ -n "${TAILSCALE_AUTHKEY:-}" ]; then
+        TS_AUTHKEY_CLEAN="$(sanitize_auth_key "$TAILSCALE_AUTHKEY")"
+        if validate_auth_key "$TS_AUTHKEY_CLEAN"; then
+            TS_AUTHKEY="$TS_AUTHKEY_CLEAN"
+            AUTH_SOURCE="env"
+        else
+            log_warn "TAILSCALE_AUTHKEY env present but invalid format; ignoring"
+        fi
+    elif [ -f "$TS_DIR/authkey" ]; then
+        TS_AUTHKEY_CLEAN="$(sanitize_auth_key "$(head -n1 "$TS_DIR/authkey" 2>/dev/null)")"
+        if validate_auth_key "$TS_AUTHKEY_CLEAN"; then
+            TS_AUTHKEY="$TS_AUTHKEY_CLEAN"
+            AUTH_SOURCE="file"
+            chmod 600 "$TS_DIR/authkey" 2>/dev/null || true
+        else
+            log_warn "Tailscale authkey file present but invalid format; ignoring"
+        fi
     fi
 
-    # Wait for daemon with longer timeout and better feedback
+    # Generate stable hostname
+    if [ -n "${TAILSCALE_HOSTNAME:-}" ]; then
+        TS_HOSTNAME="${TAILSCALE_HOSTNAME}"
+    elif [ -n "${RUNPOD_POD_ID:-}" ]; then
+        TS_HOSTNAME="coral-machine-${RUNPOD_POD_ID:0:8}"
+    else
+        if [ -f "$TS_DIR/node-id" ]; then
+            NODE_ID="$(head -c 8 "$TS_DIR/node-id" 2>/dev/null)"
+        else
+            NODE_ID="$(tr -dc 'a-f0-9' </dev/urandom | head -c8)"
+            echo "$NODE_ID" > "$TS_DIR/node-id" 2>/dev/null || true
+        fi
+        TS_HOSTNAME="coral-machine-${NODE_ID}"
+    fi
+
+    # Start daemon
+    TS_MODE="kernel"
+    [ ! -e /dev/net/tun ] && TS_MODE="userspace"
+    start_tailscale_daemon "$TS_DIR" "$TS_MODE"
+
+    # Wait for daemon startup
     DAEMON_READY=false
     log_ts "Waiting for daemon to start..."
-    for i in {1..30}; do 
+    for i in {1..30}; do
         if tailscale status --json >/dev/null 2>&1; then
             DAEMON_READY=true
             break
@@ -280,99 +332,127 @@ if command -v tailscaled >/dev/null 2>&1; then
 
     if [ "$DAEMON_READY" = false ]; then
         log_error "Tailscale daemon failed to start after 30 seconds"
-        
-        # Auto-cleanup stalled daemon and state (preserves authkey)
-        log_warn "Cleaning up stalled Tailscale daemon..."
-        
-        # 1. Force kill any hung tailscaled process
-        if pgrep -x tailscaled >/dev/null; then
-            pkill -9 tailscaled 2>/dev/null || true
-            sleep 1  # Give it a moment to die
-            log_ts "Killed stalled daemon process"
-        fi
-        
-        # 2. Remove state files that cause stalls (but preserve authkey!)
-        rm -f "$TS_DIR/tailscaled.state" "$TS_DIR/tailscaled.state.tmp" "$TS_DIR"/*.lock
-        rm -f /run/tailscale/tailscaled.sock
-        log_ts "Removed stale state files"
-        
-        # 3. Archive the failed log for debugging (don't delete it)
+        cleanup_tailscale_state "$TS_DIR"
         if [ -f "$TS_DIR/tailscaled.log" ]; then
             mv "$TS_DIR/tailscaled.log" "$TS_DIR/tailscaled.log.failed.$(date +%Y%m%d_%H%M%S)"
             log_ts "Archived failed log for debugging"
         fi
-        
         log_info "Cleanup complete. State reset for clean restart (authkey preserved)"
-        # Continue without Tailscale instead of hanging
     else
-        # Check actual backend state robustly (jq preferred, grep fallback)
-        if command -v jq >/dev/null 2>&1; then
-            BACKEND_STATE="$(timeout 5 tailscale status --json 2>/dev/null | jq -r '.BackendState // "unknown"')"
+        # Check if already connected
+        if timeout 5 tailscale ip -4 >/dev/null 2>&1; then
+            log_ts "Already connected"
+            BACKEND_STATE="Running"
         else
-            BACKEND_STATE="unknown"
-            if timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"NeedsLogin"'; then
-                BACKEND_STATE="NeedsLogin"
-            elif timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
-                BACKEND_STATE="Running"
-            fi
-        fi
-
-        if [ "$BACKEND_STATE" = "NeedsLogin" ]; then
-            # Only attempt login if we have an authkey
-            if [ -n "$TS_AUTHKEY" ]; then
-                log_ts "Authenticating with provided key (source: $AUTH_SOURCE)..."
+            # Authenticate if needed
+            BACKEND_STATE="$(get_backend_state)"
+            if [ "$BACKEND_STATE" != "Running" ] && [ -n "$TS_AUTHKEY" ]; then
+                log_ts "Backend state: $BACKEND_STATE. Authenticating with key (source: $AUTH_SOURCE)..."
                 if timeout 30 tailscale up --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" >/dev/null 2>&1; then
                     log_ts "Authentication successful"
-                    BACKEND_STATE="Running"  # Update state for later checks
+                    BACKEND_STATE="Running"
                 else
-                    log_error "Authentication failed. Check: tail -20 $TS_DIR/tailscaled.log"
-                    log_warn "Tailscale will continue trying in background"
+                    log_info "Authentication timeout, retrying (daemon may still be connecting)..."
+                    sleep 10
+                    if timeout 30 tailscale up --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" >/dev/null 2>&1; then
+                        log_ts "Authentication successful after reset"
+                        BACKEND_STATE="Running"
+                    else
+                        log_warn "Authentication not yet established; will verify connectivity after a short wait"
+                    fi
                 fi
-            else
+            elif [ "$BACKEND_STATE" = "Running" ]; then
+                log_ts "Already authenticated, updating hostname..."
+                timeout 10 tailscale up --hostname="$TS_HOSTNAME" >/dev/null 2>&1 || true
+            elif [ -z "$TS_AUTHKEY" ]; then
                 log_warn "Tailscale needs authentication"
-                log_warn "Action: Set TAILSCALE_AUTHKEY env var or echo 'tskey-auth-...' > $TS_DIR/authkey"
-                log_warn "Then restart the container to authenticate"
+                log_warn "Action: Set TAILSCALE_AUTHKEY or echo 'tskey-auth-...' > $TS_DIR/authkey"
             fi
-        elif [ "$BACKEND_STATE" = "Running" ]; then
-            # Already authenticated, just update hostname if needed
-            log_ts "Already authenticated, updating hostname..."
-            timeout 10 tailscale up --hostname="$TS_HOSTNAME" >/dev/null 2>&1 || true
-        else
-            log_warn "Unknown Tailscale state, skipping configuration"
-        fi
-    fi
-
-    # Enable Tailscale SSH and serve (only if fully authenticated and running)
-    if [ "$BACKEND_STATE" = "Running" ]; then
-        # Enable Tailscale SSH
-        if timeout 5 tailscale set --ssh >/dev/null 2>&1; then
-            log_ts "Tailscale SSH enabled"
         fi
 
-        # If userspace mode, expose SSH over tailnet
-        SERVE_STATUS=""
-        if [ "$TS_MODE" = "userspace" ]; then
-            if timeout 5 tailscale serve tcp:2222 127.0.0.1:2222 >/dev/null 2>&1; then
+        # Give Tailscale up to 30 seconds to establish connection
+        for i in {1..6}; do
+            if tailscale ip -4 >/dev/null 2>&1; then
+                BACKEND_STATE="Running"
+                log_ts "Connection established"
+                break
+            fi
+            sleep 5
+        done
+
+        # Final decision after wait window to avoid premature error logs
+        if ! timeout 5 tailscale ip -4 >/dev/null 2>&1; then
+            BACKEND_STATE="$(get_backend_state)"
+            log_error "Authentication failed after retries. Debug: tail -40 $TS_DIR/tailscaled.log"
+        fi
+
+        # Enable features if authenticated
+        if [ "$BACKEND_STATE" = "Running" ]; then
+            timeout 5 tailscale set --ssh >/dev/null 2>&1 && log_ts "Tailscale SSH enabled"
+
+            SERVE_STATUS=""
+            if [ "$TS_MODE" = "userspace" ] && timeout 5 tailscale serve --bg --tcp 2222 127.0.0.1:2222 >/dev/null 2>&1; then
                 SERVE_STATUS=", serving :2222→localhost:2222"
                 log_ts "Tailscale serve configured for port 2222"
             fi
-        fi
 
-        # Report final status
-        if timeout 5 tailscale status >/dev/null 2>&1; then
-            TS_IP="$(timeout 5 tailscale ip -4 2>/dev/null | head -n1)"
-            log_ts "Connected: $TS_HOSTNAME @ $TS_IP (mode: $TS_MODE$SERVE_STATUS)"
-        else
-            log_error "Tailscale status check failed"
-            log_error "Debug: tail -20 $TS_DIR/tailscaled.log"
+            if timeout 5 tailscale status >/dev/null 2>&1; then
+                TS_IP="$(timeout 5 tailscale ip -4 2>/dev/null | head -n1)"
+                log_ts "Connected: $TS_HOSTNAME @ $TS_IP (mode: $TS_MODE$SERVE_STATUS)"
+            else
+                log_error "Status check failed. Debug: tail -20 $TS_DIR/tailscaled.log"
+            fi
+        elif [ "$DAEMON_READY" = true ]; then
+            log_ts "Daemon running but not authenticated (state: ${BACKEND_STATE:-unknown})"
         fi
-    elif [ "$DAEMON_READY" = true ]; then
-        # Daemon is ready but not authenticated
-        log_ts "Daemon running but not authenticated (state: ${BACKEND_STATE:-unknown})"
-        log_ts "SSH/serve features will be enabled after authentication"
     fi
 else
     log_ts "Not installed"
+fi
+
+# Collect status variables for summary
+SSH_RUNNING=$(pgrep -x sshd >/dev/null && echo "true" || echo "false")
+SSHKEY_COUNT=0
+if [ -f /workspace/.ssh/authorized_keys ]; then
+    SSHKEY_COUNT=$(grep -c '^ssh-' /workspace/.ssh/authorized_keys 2>/dev/null || echo 0)
+fi
+
+# Development environment status
+COMPILER_STATUS=$(which nvc++ &>/dev/null && echo "✓" || echo "✗")
+PALABOS_STATUS=$([ -f "/workspace/deps/lib/libpalabos.a" ] && echo "✓" || echo "✗")
+PARAVIEW_STATUS=$(which pvserver &>/dev/null && echo "✓" || echo "✗")
+ENV_INITIALIZED=$([ -f "/workspace/deps/env.sh" ] && echo "✓" || echo "✗")
+
+# GPU status
+GPU_STATUS="not detected"
+if [ -n "${GPU_ARCH_NAME:-}" ]; then
+    GPU_STATUS="${GPU_ARCH_NAME} (${GPU_ARCH_FLAG})"
+fi
+
+# Tailscale status (only if installed)
+TS_AVAILABLE="false"
+TS_CONNECTED="false"
+TS_IP_ADDR=""
+TS_HOSTNAME_SAFE=""
+TS_MODE_SAFE=""
+if command -v tailscale >/dev/null 2>&1; then
+    TS_AVAILABLE="true"
+    # Check actual connectivity
+    if timeout 5 tailscale ip -4 >/dev/null 2>&1; then
+        TS_CONNECTED="true"
+    fi
+
+    if [ "$TS_CONNECTED" = "true" ]; then
+        TS_IP_ADDR="$(timeout 5 tailscale ip -4 2>/dev/null | head -n1)"
+        TS_HOSTNAME_SAFE="${TS_HOSTNAME:-unknown}"
+        TS_MODE_SAFE="${TS_MODE:-kernel}"
+    fi
+fi
+
+# Cursor/VSCode persistence status
+CURSOR_PERSISTED="✗"
+if [ "$(ls -A "$PERSIST_ROOT/cursor-server" 2>/dev/null)" ]; then
+    CURSOR_PERSISTED="✓"
 fi
 
 # Final status summary
@@ -380,39 +460,73 @@ echo ""
 log_ready "Coral Machine Development Environment"
 echo "========================================="
 
-# Connection recipes based on what's actually available
-if pgrep -x sshd >/dev/null; then
+# Environment Status
+echo ""
+echo "Environment Status:"
+echo "  Workspace:   $ENV_INITIALIZED /workspace/deps/env.sh"
+echo "  GPU:         $GPU_STATUS"
+echo "  Compiler:    $COMPILER_STATUS nvc++ (HPC SDK)"
+echo "  Palabos:     $PALABOS_STATUS physics library"
+echo "  ParaView:    $PARAVIEW_STATUS visualization server"
+echo "  Persistence: $CURSOR_PERSISTED Cursor/VSCode data"
+
+# SSH Key Status (applies to all SSH methods)
+echo ""
+if [ "$SSHKEY_COUNT" -eq 0 ]; then
+    echo "⚠️  SSH Keys: No keys configured"
+    echo "   Action: echo 'ssh-ed25519 YOUR_KEY' >> /workspace/.ssh/authorized_keys"
+else
+    echo "✓  SSH Keys: $SSHKEY_COUNT authorized key(s) configured"
+fi
+
+# Connection Methods
+echo ""
+echo "Connection Methods:"
+
+# Direct SSH (always show if SSH is running)
+if [ "$SSH_RUNNING" = "true" ]; then
     POD_IP="${RUNPOD_POD_IP:-$(hostname -I | awk '{print $1}')}"
-    echo "SSH Connections:"
-    echo "  Direct:    ssh root@$POD_IP -p 2222"
-    echo "  + ParaView: ssh root@$POD_IP -p 2222 -L 11111:localhost:11111"
-    
-    if [ -f /workspace/.ssh/authorized_keys ] && [ $(grep -c '^ssh-' /workspace/.ssh/authorized_keys 2>/dev/null || echo 0) -eq 0 ]; then
-        echo "  ⚠️ No keys: echo 'YOUR_SSH_KEY' >> /workspace/.ssh/authorized_keys"
-    fi
-fi
-
-if command -v tailscale >/dev/null 2>&1 && timeout 5 tailscale status >/dev/null 2>&1; then
-    TS_IP="$(timeout 5 tailscale ip -4 2>/dev/null | head -n1)"
     echo ""
-    echo "Tailscale SSH:"
-    echo "  Terminal:  ssh root@$TS_IP"
-    if [ "$TS_MODE" = "userspace" ]; then
-        echo "  Cursor:    ssh root@$TS_IP -p 2222"
-    fi
+    echo "  Direct SSH (ports 22, 2222):"
+    echo "    Terminal:  ssh root@$POD_IP -p 2222"
+    echo "    + ParaView: ssh root@$POD_IP -p 2222 -L 11111:localhost:11111"
 fi
 
+# Tailscale SSH (only if connected)
+if [ "$TS_CONNECTED" = "true" ]; then
+    echo ""
+    echo "  Tailscale SSH (zero-config):"
+    echo "    Terminal:  ssh root@$TS_IP_ADDR"
+    echo "    MagicDNS:  ssh root@$TS_HOSTNAME_SAFE"
+    if [ "$TS_MODE_SAFE" = "userspace" ]; then
+        echo "    Cursor:    ssh root@$TS_IP_ADDR -p 2222"
+        echo "    MagicDNS:  ssh root@$TS_HOSTNAME_SAFE -p 2222"
+    fi
+elif [ "$TS_AVAILABLE" = "true" ]; then
+    echo ""
+    echo "  Tailscale: Available but not connected"
+    echo "    Action: Set TAILSCALE_AUTHKEY or configure auth key"
+fi
+
+# RunPod SSH (if available)
 if [ -n "${RUNPOD_POD_ID:-}" ]; then
     echo ""
-    echo "RunPod SSH:"
-    echo "  Default:   ssh root@${RUNPOD_POD_ID}.ssh.runpod.io"
+    echo "  RunPod SSH (platform native):"
+    echo "    Default:   ssh root@${RUNPOD_POD_ID}.ssh.runpod.io"
+fi
+
+# Show warning if no SSH methods are available
+if [ "$SSH_RUNNING" = "false" ] && [ "$TS_CONNECTED" = "false" ] && [ -z "${RUNPOD_POD_ID:-}" ]; then
+    echo ""
+    echo "  ⚠️  No SSH connections available"
 fi
 
 echo ""
 echo "Quick Commands:"
-echo "  paraview   - Start ParaView server"
-echo "  pv status  - Check ParaView status"
-echo "  coral-help - Show all commands"
+echo "  paraview       - Start ParaView server (port 11111)"
+echo "  pv status      - Check ParaView server status"
+echo "  coral-help     - Show all available commands"
+echo "  make setup     - Initialize development environment"
 echo "========================================="
 
 # Keep container running
