@@ -223,12 +223,20 @@ sanitize_auth_key() {
 }
 
 get_backend_state() {
+    local status_json=""
+
     if command -v jq >/dev/null 2>&1; then
-        timeout 5 tailscale status --json 2>/dev/null | jq -r '.BackendState // "unknown"'
+        if status_json="$(timeout 5 tailscale status --json 2>/dev/null)"; then
+            jq -r '.BackendState // "unknown"' <<<"$status_json"
+        else
+            echo "unknown"
+        fi
     else
-        if timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"Running"'; then
+        status_json="$(timeout 5 tailscale status --json 2>/dev/null || true)"
+
+        if printf '%s' "$status_json" | grep -q '"BackendState":"Running"'; then
             echo "Running"
-        elif timeout 5 tailscale status --json 2>/dev/null | grep -q '"BackendState":"NeedsLogin"'; then
+        elif printf '%s' "$status_json" | grep -q '"BackendState":"NeedsLogin"'; then
             echo "NeedsLogin"
         else
             echo "unknown"
@@ -271,10 +279,72 @@ cleanup_tailscale_state() {
     fi
 }
 
+# Quick daemon readiness check (5s max, then continue)
+wait_for_daemon() {
+    for i in {1..10}; do
+        tailscale status --json >/dev/null 2>&1 && return 0
+        sleep 0.5
+    done
+    return 1  # Continue anyway
+}
+
+# Enable optional Tailscale features once connected
+enable_tailscale_features() {
+    local ts_mode="$1"
+    # Enable Tailscale SSH (best-effort)
+    timeout 5 tailscale set --ssh >/dev/null 2>&1 && log_ts "Tailscale SSH enabled"
+    # Configure serve mapping in userspace mode (best-effort)
+    if [ "$ts_mode" = "userspace" ] && timeout 5 tailscale serve --bg --tcp 2222 127.0.0.1:2222 >/dev/null 2>&1; then
+        log_ts "Tailscale serve configured for port 2222"
+    fi
+}
+
+# Background watcher: report state transitions and exit when Running
+watch_tailscale_state() {
+    local ts_mode="$1"
+    local prev_state="unknown"
+    local -a delays=(0.5 1 2 4 8 10 10 10)
+    local delay_idx=0
+    local start_time=$SECONDS
+
+    while [ $((SECONDS - start_time)) -lt 120 ]; do
+        # Prefer concrete connectivity signal
+        local ip=""
+        ip="$(timeout 2 tailscale ip -4 2>/dev/null | head -n1 || true)"
+        local state="unknown"
+
+        if [ -n "$ip" ]; then
+            state="Running"
+        else
+            state="$(get_backend_state)"
+        fi
+
+        if [ "$state" != "$prev_state" ]; then
+            if [ "$state" = "Running" ]; then
+                log_ts "Connected: ${TS_HOSTNAME:-unknown} @ ${ip:-unknown}"
+                enable_tailscale_features "$ts_mode"
+                return 0
+            else
+                log_ts "State: $state"
+            fi
+            prev_state="$state"
+        fi
+
+        # Simple backoff with predefined delays
+        sleep "${delays[$delay_idx]:-10}"
+        [ $delay_idx -lt $((${#delays[@]} - 1)) ] && delay_idx=$((delay_idx + 1))
+    done
+
+    log_warn "Tailscale setup timeout (continuing in background)"
+    return 1
+}
+
 # Tailscale Setup
 if command -v tailscaled >/dev/null 2>&1; then
     TS_DIR="/workspace/deps/runtime/tailscale"
     mkdir -p "$TS_DIR" /run/tailscale
+
+    cleanup_tailscale_state "$TS_DIR"
 
     # Get and validate auth key (env takes precedence)
     TS_AUTHKEY=""
@@ -319,92 +389,26 @@ if command -v tailscaled >/dev/null 2>&1; then
     [ ! -e /dev/net/tun ] && TS_MODE="userspace"
     start_tailscale_daemon "$TS_DIR" "$TS_MODE"
 
-    # Wait for daemon startup
-    DAEMON_READY=false
-    log_ts "Waiting for daemon to start..."
-    for i in {1..30}; do
-        if tailscale status --json >/dev/null 2>&1; then
-            DAEMON_READY=true
-            break
-        fi
-        sleep 1
-    done
-
-    if [ "$DAEMON_READY" = false ]; then
-        log_error "Tailscale daemon failed to start after 30 seconds"
-        cleanup_tailscale_state "$TS_DIR"
-        if [ -f "$TS_DIR/tailscaled.log" ]; then
-            mv "$TS_DIR/tailscaled.log" "$TS_DIR/tailscaled.log.failed.$(date +%Y%m%d_%H%M%S)"
-            log_ts "Archived failed log for debugging"
-        fi
-        log_info "Cleanup complete. State reset for clean restart (authkey preserved)"
+    # Quick daemon readiness check
+    if wait_for_daemon; then
+        log_ts "Daemon ready"
     else
-        # Check if already connected
-        if timeout 5 tailscale ip -4 >/dev/null 2>&1; then
-            log_ts "Already connected"
-            BACKEND_STATE="Running"
-        else
-            # Authenticate if needed
-            BACKEND_STATE="$(get_backend_state)"
-            if [ "$BACKEND_STATE" != "Running" ] && [ -n "$TS_AUTHKEY" ]; then
-                log_ts "Backend state: $BACKEND_STATE. Authenticating with key (source: $AUTH_SOURCE)..."
-                if timeout 30 tailscale up --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" >/dev/null 2>&1; then
-                    log_ts "Authentication successful"
-                    BACKEND_STATE="Running"
-                else
-                    log_info "Authentication timeout, retrying (daemon may still be connecting)..."
-                    sleep 10
-                    if timeout 30 tailscale up --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" >/dev/null 2>&1; then
-                        log_ts "Authentication successful after reset"
-                        BACKEND_STATE="Running"
-                    else
-                        log_warn "Authentication not yet established; will verify connectivity after a short wait"
-                    fi
-                fi
-            elif [ "$BACKEND_STATE" = "Running" ]; then
-                log_ts "Already authenticated, updating hostname..."
-                timeout 10 tailscale up --hostname="$TS_HOSTNAME" >/dev/null 2>&1 || true
-            elif [ -z "$TS_AUTHKEY" ]; then
-                log_warn "Tailscale needs authentication"
-                log_warn "Action: Set TAILSCALE_AUTHKEY or echo 'tskey-auth-...' > $TS_DIR/authkey"
-            fi
-        fi
+        log_warn "Daemon slow to start (continuing anyway)"
+    fi
+    # Always use watcher (handles all cases including already connected)
+    watch_tailscale_state "$TS_MODE" &
 
-        # Give Tailscale up to 30 seconds to establish connection
-        for i in {1..6}; do
-            if tailscale ip -4 >/dev/null 2>&1; then
-                BACKEND_STATE="Running"
-                log_ts "Connection established"
-                break
-            fi
-            sleep 5
-        done
-
-        # Final decision after wait window to avoid premature error logs
-        if ! timeout 5 tailscale ip -4 >/dev/null 2>&1; then
-            BACKEND_STATE="$(get_backend_state)"
-            log_error "Authentication failed after retries. Debug: tail -40 $TS_DIR/tailscaled.log"
-        fi
-
-        # Enable features if authenticated
-        if [ "$BACKEND_STATE" = "Running" ]; then
-            timeout 5 tailscale set --ssh >/dev/null 2>&1 && log_ts "Tailscale SSH enabled"
-
-            SERVE_STATUS=""
-            if [ "$TS_MODE" = "userspace" ] && timeout 5 tailscale serve --bg --tcp 2222 127.0.0.1:2222 >/dev/null 2>&1; then
-                SERVE_STATUS=", serving :2222→localhost:2222"
-                log_ts "Tailscale serve configured for port 2222"
-            fi
-
-            if timeout 5 tailscale status >/dev/null 2>&1; then
-                TS_IP="$(timeout 5 tailscale ip -4 2>/dev/null | head -n1)"
-                log_ts "Connected: $TS_HOSTNAME @ $TS_IP (mode: $TS_MODE$SERVE_STATUS)"
-            else
-                log_error "Status check failed. Debug: tail -20 $TS_DIR/tailscaled.log"
-            fi
-        elif [ "$DAEMON_READY" = true ]; then
-            log_ts "Daemon running but not authenticated (state: ${BACKEND_STATE:-unknown})"
-        fi
+    # Start auth if needed
+    BACKEND_STATE="$(get_backend_state)"
+    if [ "$BACKEND_STATE" != "Running" ] && [ -n "$TS_AUTHKEY" ]; then
+        log_ts "Initiating authentication (source: $AUTH_SOURCE)..."
+        tailscale up --authkey="$TS_AUTHKEY" --hostname="$TS_HOSTNAME" >/dev/null 2>&1 &
+    elif [ "$BACKEND_STATE" = "Running" ]; then
+        log_ts "Already authenticated, updating hostname..."
+        timeout 10 tailscale up --hostname="$TS_HOSTNAME" >/dev/null 2>&1 || true
+    elif [ -z "$TS_AUTHKEY" ]; then
+        log_warn "No auth key provided"
+        log_warn "Set TAILSCALE_AUTHKEY or echo 'tskey-...' > $TS_DIR/authkey"
     fi
 else
     log_ts "Not installed"

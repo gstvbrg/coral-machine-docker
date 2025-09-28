@@ -1,0 +1,57 @@
+2025-09-24T21:49:59.168847031Z [INFO] Starting Coral Machine Development Environment (RunPod)
+2025-09-24T21:49:59.186667436Z [INFO] Scripts directory ready
+2025-09-24T21:49:59.186887473Z [INFO] Detecting GPU architecture...
+2025-09-24T21:49:59.211012097Z [GPU] Detected: NVIDIA GeForce RTX 4090
+2025-09-24T21:49:59.234100298Z [GPU] Architecture: NVIDIA (cc89) (cc89)
+2025-09-24T21:49:59.234131007Z [GPU] Build flags set:
+2025-09-24T21:49:59.234136807Z   CUDA_COMPUTE_CAPABILITY=89
+2025-09-24T21:49:59.234142617Z   CUDA_ARCH_FLAG=cc89
+2025-09-24T21:49:59.234147997Z   CUDA_ARCH_SM=sm_89
+2025-09-24T21:49:59.234152727Z   NVHPC_GPU_FLAG=-gpu=cc89
+2025-09-24T21:49:59.234156737Z   CMAKE_CUDA_ARCHITECTURES=89
+2025-09-24T21:49:59.373256113Z [GPU] Environment variables written to /workspace/deps/env.sh
+2025-09-24T21:49:59.373287363Z [INFO] GPU: NVIDIA GeForce RTX 4090 detected (cc89)
+2025-09-24T21:49:59.376337464Z [ENV] Environment loaded from /workspace/deps/env.sh
+2025-09-24T21:49:59.411509371Z   ✓ nvc++ compiler
+2025-09-24T21:49:59.411704818Z   ✓ Palabos library
+2025-09-24T21:49:59.433599498Z   ✓ ParaView server
+2025-09-24T21:49:59.433620068Z   ✓ GPU arch: NVIDIA (cc89) (cc89)
+2025-09-24T21:49:59.932415373Z [INFO] Unified persistence: Cursor/VSCode + XDG + package caches → persistent volume
+2025-09-24T21:49:59.973914400Z [INFO] Cursor server is persisted from volume - fast startup enabled
+2025-09-24T21:50:00.037825618Z [INFO] Added aliases to ~/.bashrc (paraview, pv, coral-help)
+2025-09-24T21:50:00.126061407Z [SSH] Starting SSH server...
+2025-09-24T21:50:00.682146776Z [SSH] Copied persistent host keys from /workspace/.ssh/ to /etc/ssh/
+2025-09-24T21:50:00.789482540Z [SSH] Authorized keys: 2 found in /workspace/.ssh/authorized_keys
+2025-09-24T21:50:00.868501157Z [SSH] Using symlinked host keys
+2025-09-24T21:50:00.936620028Z [SSH] Listening on ports 22 and 2222 (key auth only)
+2025-09-24T21:50:01.060721574Z [TS] Preserved tailscaled.state; only cleaned locks/socket
+2025-09-24T21:50:01.413086850Z [TS] Daemon ready
+2025-09-24T21:50:01.527737737Z [TS] Initiating authentication (source: env)...
+2025-09-24T21:50:01.570150259Z [TS] State: NoState
+2025-09-24T21:50:01.833870753Z [READY] Coral Machine Development Environment
+2025-09-24T21:50:01.833877053Z =========================================
+2025-09-24T21:50:01.833885653Z Environment Status:
+2025-09-24T21:50:01.833894832Z   Workspace:   ✓ /workspace/deps/env.sh
+2025-09-24T21:50:01.833899502Z   GPU:         NVIDIA (cc89) (cc89)
+2025-09-24T21:50:01.833903802Z   Compiler:    ✓ nvc++ (HPC SDK)
+2025-09-24T21:50:01.833908222Z   Palabos:     ✓ physics library
+2025-09-24T21:50:01.833912412Z   ParaView:    ✓ visualization server
+2025-09-24T21:50:01.833916592Z   Persistence: ✓ Cursor/VSCode data
+2025-09-24T21:50:01.833975211Z ✓  SSH Keys: 2 authorized key(s) configured
+2025-09-24T21:50:01.833992581Z Connection Methods:
+2025-09-24T21:50:01.863502919Z   Direct SSH (ports 22, 2222):
+2025-09-24T21:50:01.863508249Z     Terminal:  ssh root@172.21.0.2 -p 2222
+2025-09-24T21:50:01.863512819Z     + ParaView: ssh root@172.21.0.2 -p 2222 -L 11111:localhost:11111
+2025-09-24T21:50:01.863612477Z   Tailscale: Available but not connected
+2025-09-24T21:50:01.863617607Z     Action: Set TAILSCALE_AUTHKEY or configure auth key
+2025-09-24T21:50:01.863626527Z   RunPod SSH (platform native):
+2025-09-24T21:50:01.863631657Z     Default:   ssh root@u5k3zunuenc3vb.ssh.runpod.io
+2025-09-24T21:50:01.863658126Z Quick Commands:
+2025-09-24T21:50:01.863689586Z   paraview       - Start ParaView server (port 11111)
+2025-09-24T21:50:01.863710826Z   pv status      - Check ParaView server status
+2025-09-24T21:50:01.863719756Z   coral-help     - Show all available commands
+2025-09-24T21:50:01.863724445Z   make setup     - Initialize development environment
+2025-09-24T21:50:01.863730395Z =========================================
+2025-09-24T21:50:03.371504678Z [TS] Connected: coral-machine @ 100.69.218.48
+2025-09-24T21:50:03.434263465Z [TS] Tailscale SSH enabled
+2025-09-24T21:50:03.496261404Z [TS] Tailscale serve configured for port 2222
