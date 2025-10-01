@@ -47,6 +47,10 @@ mkdir -p "$DEPS_ROOT/runtime/pip-user/bin"
 # Tailscale state directory
 mkdir -p "$DEPS_ROOT/runtime/tailscale"
 
+# AI assistant conversation history
+mkdir -p "$DEPS_ROOT/runtime/.claude"
+mkdir -p "$DEPS_ROOT/runtime/.codex"
+
 log_success "Runtime directories created"
 
 log_info "Configuring IDE default settings..."

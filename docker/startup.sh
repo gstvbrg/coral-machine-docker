@@ -54,6 +54,15 @@ if [ -f "/workspace/deps/runtime/motd" ]; then
     echo "✅ Custom MOTD loaded from volume"
 fi
 
+# Link AI assistant conversation history from volume
+echo "🔧 Setting up AI assistant persistence..."
+PERSIST_ROOT="/workspace/deps/runtime"
+mkdir -p "$PERSIST_ROOT/.claude" "$PERSIST_ROOT/.codex"
+ln -sfn "$PERSIST_ROOT/.claude" /root/.claude
+ln -sfn "$PERSIST_ROOT/.codex" /root/.codex
+echo "✅ Claude Code history linked from volume"
+echo "✅ Codex data linked from volume"
+
 # Start SSH daemon (no sudo needed as root)
 echo "📡 Starting SSH daemon..."
 service ssh start

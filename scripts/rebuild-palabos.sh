@@ -6,7 +6,34 @@ set -euo pipefail
 # --- Locate repository root to reuse shared logging helpers
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
-source "${REPO_ROOT}/lib/common.sh"
+
+COMMON_CANDIDATES=(
+  "${REPO_ROOT}/lib/common.sh"
+  "/workspace/source/coral-machine-docker/lib/common.sh"
+  "/opt/volume-setup/lib/common.sh"
+  "/workspace/deps/lib/common.sh"
+)
+
+COMMON_LOADED=0
+for candidate in "${COMMON_CANDIDATES[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+        # shellcheck disable=SC1090
+        source "${candidate}"
+        COMMON_LOADED=1
+        break
+    fi
+done
+
+if [[ ${COMMON_LOADED} -eq 0 ]]; then
+    # Minimal fallback logging helpers if common.sh is unavailable
+    log_section() { printf "\n=========================================\n%s\n=========================================\n" "$1"; }
+    log_info()    { printf "ℹ️  %s\n" "$1"; }
+    log_success() { printf "✅ %s\n" "$1"; }
+    log_warn()    { printf "⚠️  %s\n" "$1"; }
+    log_error()   { printf "❌ %s\n" "$1"; }
+else
+    log_info "Loaded logging helpers from ${candidate}"
+fi
 
 # --- Defaults that can be overridden via flags or environment variables
 PALABOS_SRC_DEFAULT="${PALABOS_SRC:-/workspace/deps/palabos-hybrid}"

@@ -78,6 +78,8 @@ mkdir -p "$PERSIST_ROOT"/{cursor-server,vscode-server,cursor-home}
 mkdir -p "$PERSIST_ROOT"/{config,data,state,cache}
 mkdir -p "$PERSIST_ROOT"/{npm,pip,yarn}
 mkdir -p "$PERSIST_ROOT"/{npm-global,pip-user}
+mkdir -p "$PERSIST_ROOT/.claude"
+mkdir -p "$PERSIST_ROOT/.codex"
 
 # Ensure parent directories exist
 mkdir -p /root/.local /root/.cache
@@ -87,6 +89,12 @@ mkdir -p /root/.local /root/.cache
 ln -sfn "$PERSIST_ROOT/cursor-server" /root/.cursor-server
 ln -sfn "$PERSIST_ROOT/vscode-server" /root/.vscode-server
 ln -sfn "$PERSIST_ROOT/cursor-home" /root/.cursor
+
+# Claude Code conversation history
+ln -sfn "$PERSIST_ROOT/.claude" /root/.claude
+
+# Codex conversation history
+ln -sfn "$PERSIST_ROOT/.codex" /root/.codex
 
 # XDG directories (essential for extension state)
 ln -sfn "$PERSIST_ROOT/config" /root/.config
@@ -99,7 +107,7 @@ ln -sfn "$PERSIST_ROOT/npm" /root/.npm
 ln -sfn "$PERSIST_ROOT/pip" /root/.cache/pip
 ln -sfn "$PERSIST_ROOT/yarn" /root/.yarn
 
-log_info "Unified persistence: Cursor/VSCode + XDG + package caches → persistent volume"
+log_info "Unified persistence: Cursor/VSCode + Claude Code + Codex + XDG + package caches → persistent volume"
 
 
 # Check if Cursor server is persisted
